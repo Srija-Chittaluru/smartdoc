@@ -1,0 +1,20 @@
+.env
+.venv/
+venv/
+
+chroma_db/
+
+# Recorded query history for the Analytics page. Local usage data, and it
+# contains the questions people typed - not something to commit.
+data/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local model cache
+.cache/
+
+# macOS
+.DS_Store

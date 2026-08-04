@@ -1,0 +1,28 @@
+# --- Web layer ---
+fastapi>=0.110
+uvicorn>=0.27
+streamlit>=1.36          # st.navigation / st.Page for the multipage nav
+requests>=2.31
+python-multipart>=0.0.9  # lets FastAPI accept uploaded PDFs
+
+# --- PDF parsing + chunking ---
+pypdf>=4.0
+langchain-text-splitters>=0.2
+
+# --- Vector database (persisted to disk) ---
+chromadb>=0.5
+
+# --- Embeddings: runs locally, no API key, no cost ---
+sentence-transformers>=2.7
+
+# --- Answer generation ---
+openai>=1.30
+
+# --- Config ---
+python-dotenv>=1.0
+
+# --- Tests ---
+pytest>=8.0
+
+# --- Sample data generator (only needed for make_sample_pdfs.py) ---
+reportlab>=4.0

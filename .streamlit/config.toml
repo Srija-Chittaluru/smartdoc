@@ -1,0 +1,20 @@
+# Locks SmartDoc to a light, white-background theme regardless of the
+# viewer's OS dark-mode setting. CSS alone cannot do this reliably, because
+# Streamlit picks base colours before any custom CSS is applied.
+
+[theme]
+base = "light"
+primaryColor = "#2563EB"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8FAFC"
+textColor = "#0F172A"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# Serves the ./static folder at /app/static/, which is how the browser fetches
+# static/fonts/inter-variable-latin.woff2. Without this the @font-face URL 404s
+# and the interface silently falls back to the platform font.
+enableStaticServing = true
