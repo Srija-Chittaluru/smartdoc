@@ -20,7 +20,7 @@ from typing import Dict, Generator, List, Optional
 
 from openai import OpenAI, APIError, APIConnectionError, AuthenticationError, RateLimitError
 
-from backend import vector_store
+from backend import answer_cache, vector_store
 from backend.config import CHAT_MODEL, MAX_QUESTION_LENGTH, OPENAI_API_KEY, TEMPERATURE
 
 # The exact sentence the model must use when the documents do not answer the
@@ -246,6 +246,15 @@ def _finish(answer: str, chunks: List[Dict], seconds: float) -> Dict:
 # --- The two public entry points ---------------------------------------------
 
 
+def _indexed_chunks() -> int:
+    """How many chunks are indexed. Part of the cache key, so an index rebuilt
+    behind the server's back cannot match an old answer."""
+    try:
+        return vector_store.get_collection().count()
+    except Exception:
+        return -1
+
+
 def _prepare(question: str, history) -> Dict:
     """Run the guards and retrieval that both entry points share.
 
@@ -257,6 +266,13 @@ def _prepare(question: str, history) -> Dict:
     refusal = validate_question(question)
     if refusal:
         return {"reply": refusal}
+
+    # Checked before retrieval, because a hit skips the whole rest of the
+    # pipeline - the search, the prompt and the OpenAI call.
+    chunk_count = _indexed_chunks()
+    cached = answer_cache.get(question, history, chunk_count)
+    if cached:
+        return {"reply": {**cached, "cached": True}}
 
     found = retrieve(question, history)
     if found["error"]:
@@ -304,7 +320,9 @@ def answer_question(question: str, history: Optional[List[Dict]] = None) -> Dict
     except Exception as error:
         return _llm_failure(error)
 
-    return _finish(answer, prepared["chunks"], prepared["seconds"])
+    reply = _finish(answer, prepared["chunks"], prepared["seconds"])
+    answer_cache.put(question.strip(), history, _indexed_chunks(), reply)
+    return reply
 
 
 def answer_stream(
@@ -321,7 +339,18 @@ def answer_stream(
     """
     prepared = _prepare(question, history)
     if "reply" in prepared:
-        yield {"type": "final", **prepared["reply"]}
+        reply = prepared["reply"]
+        # A cached answer still arrives as start/token/final, so the page
+        # renders it the same way as a freshly written one - it just appears
+        # all at once, because there is nothing to wait for.
+        if reply.get("cached"):
+            yield {
+                "type": "start",
+                "citations": reply.get("citations", []),
+                "retrieval_seconds": reply.get("retrieval_seconds", 0.0),
+            }
+            yield {"type": "token", "text": reply["answer"]}
+        yield {"type": "final", **reply}
         return
 
     chunks, seconds = prepared["chunks"], prepared["seconds"]
@@ -344,4 +373,6 @@ def answer_stream(
         yield {"type": "final", **_llm_failure(error)}
         return
 
-    yield {"type": "final", **_finish("".join(pieces), chunks, seconds)}
+    reply = _finish("".join(pieces), chunks, seconds)
+    answer_cache.put(question.strip(), history, _indexed_chunks(), reply)
+    yield {"type": "final", **reply}

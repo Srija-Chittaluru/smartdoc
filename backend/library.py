@@ -15,6 +15,7 @@ from typing import Dict, List, Optional
 
 from pypdf import PdfReader
 
+from backend import answer_cache
 from backend.chunker import chunk_pdf
 from backend.config import DOCUMENTS_DIR
 from backend.vector_store import get_collection
@@ -77,16 +78,38 @@ def safe_name(name: str) -> str:
     return name
 
 
+# Page counts, keyed by file path. Opening a PDF to count its pages is the
+# slowest thing list_documents() does, and it does it for every file on every
+# call - so the result is kept until the file itself changes.
+_page_cache: Dict[str, tuple] = {}
+
+
 def page_count(path: Path) -> int:
     """Total pages in a PDF, read from the file rather than from the index.
 
     The index only knows about pages that held extractable text, so a scanned
     page would be missing from that count.
+
+    Cached against the file's modification time and size, so an edited or
+    replaced file is always re-read and a stale count cannot survive.
     """
     try:
-        return len(PdfReader(str(path)).pages)
-    except Exception:
+        stat = path.stat()
+    except OSError:
         return 0
+
+    fingerprint = (stat.st_mtime, stat.st_size)
+    cached = _page_cache.get(str(path))
+    if cached and cached[0] == fingerprint:
+        return cached[1]
+
+    try:
+        pages = len(PdfReader(str(path)).pages)
+    except Exception:
+        pages = 0
+
+    _page_cache[str(path)] = (fingerprint, pages)
+    return pages
 
 
 def _digest(data: bytes) -> str:
@@ -120,6 +143,9 @@ def save_upload(data: bytes, filename: str) -> Path:
 def remove_from_index(name: str) -> None:
     """Delete every chunk belonging to one document."""
     get_collection().delete(where={"source": safe_name(name)})
+    # Remembered answers were drawn from documents that have just changed, so
+    # none of them can be trusted any more.
+    answer_cache.clear()
 
 
 def index_document(name: str) -> int:
@@ -149,6 +175,7 @@ def index_document(name: str) -> int:
             for c in chunks
         ],
     )
+    answer_cache.clear()
     return len(chunks)
 
 
@@ -171,6 +198,9 @@ def clear_library() -> None:
     ids = collection.get()["ids"]
     if ids:
         collection.delete(ids=ids)
+
+    answer_cache.clear()
+    _page_cache.clear()
 
 
 def _describe_status(indexed: bool, on_disk: bool) -> str:

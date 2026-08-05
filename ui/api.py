@@ -8,6 +8,7 @@ users, so it says what happened - not which host failed.
 import json
 
 import requests
+import streamlit as st
 
 from backend.config import API_URL
 
@@ -44,9 +45,30 @@ def get_health():
     return _request("get", "/health")
 
 
+@st.cache_data(show_spinner=False)
+def _fetch_config():
+    """Fetch the settings, raising on failure.
+
+    Raising rather than returning the error is deliberate: st.cache_data stores
+    return values but not exceptions, so a failed call is retried next time
+    instead of being remembered as "the settings are broken".
+    """
+    data, error = _request("get", "/config")
+    if error:
+        raise ConnectionError(error)
+    return data
+
+
 def get_config():
-    """The active chunk size, models and vector-DB settings."""
-    return _request("get", "/config")
+    """The active chunk size, models and vector-DB settings.
+
+    Cached for the life of the session - these are constants read at startup,
+    so they cannot change while the app is running.
+    """
+    try:
+        return _fetch_config(), None
+    except ConnectionError as error:
+        return None, str(error)
 
 
 def ask_question(question: str, history=None):
