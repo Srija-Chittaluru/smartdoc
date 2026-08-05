@@ -1,0 +1,798 @@
+/* SmartDoc interface styles.
+   Loaded by app.py. Streamlit's own markup is targeted by data-testid,
+   which is the only stable hook it exposes. */
+
+/* Inter — the interface typeface. Neutral, tall x-height, drawn for screen text
+   at small sizes, so dense policy answers stay readable.
+
+   The font file is served from ./static by Streamlit (enableStaticServing in
+   .streamlit/config.toml). @import from Google Fonts does NOT work here:
+   Streamlit injects this CSS into a <style> element in the page, where an
+   @import is unreliable, so the font never loaded and everything silently fell
+   back to the platform font. A local file also means no network dependency. */
+@font-face {
+  font-family: "Inter";
+  src: url("/app/static/fonts/inter-variable-latin.woff2") format("woff2");
+  font-weight: 100 900;   /* one variable file covers every weight */
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --sd-ink:      #0f172a;
+  --sd-ink-soft: #475569;
+  --sd-muted:    #94a3b8;
+  --sd-line:     #e5e9f0;
+  --sd-surface:  #f8fafc;
+  --sd-accent:   #2563eb;
+  --sd-accent-2: #1d4ed8;
+  --sd-good:     #059669;
+  --sd-warn:     #b45309;
+  --sd-shadow:   0 1px 2px rgba(15, 23, 42, .04), 0 8px 24px -12px rgba(15, 23, 42, .12);
+}
+
+/* Keep the canvas white even if the browser prefers dark. */
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+  background: #ffffff;
+}
+[data-testid="stHeader"] { background: transparent; }
+
+/* Streamlit declares font-family on its own emotion-classed elements, so a
+   broad selector is needed to override it — but it MUST exclude the icon
+   spans. Those spans carry st-emotion-cache-* classes too, and swapping their
+   icon font for a text font makes ligature names like "keyboard_arrow_right"
+   render as literal text instead of a chevron. */
+html, body, [class*="st-"]:not([data-testid="stIconMaterial"]) {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* calt/liga keep Inter's contextual pairs; ss01 uses the disambiguated
+     single-storey glyphs, which read cleaner in a dense UI. */
+  font-feature-settings: "calt" 1, "liga" 1, "ss01" 1;
+  color: var(--sd-ink);
+}
+
+/* Code keeps a monospace face — the platform ones are already good, so no
+   second webfont download. */
+code, kbd, pre, [data-testid="stCode"] {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+               "Liberation Mono", monospace !important;
+  font-feature-settings: normal;
+}
+
+/* Belt and braces: whatever else is declared, icon spans keep the icon font
+   so their ligatures resolve to glyphs. */
+[data-testid="stIconMaterial"],
+span[class*="material-symbols"],
+.material-icons,
+.material-icons-outlined {
+  font-family: "Material Symbols Rounded", "Material Icons" !important;
+  font-weight: normal !important;
+  font-style: normal !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+  font-variant-ligatures: normal !important;
+  -webkit-font-feature-settings: "liga" !important;
+  font-feature-settings: "liga" !important;
+  white-space: nowrap;
+}
+
+/* Give the conversation a comfortable reading column. */
+[data-testid="stMain"] .block-container {
+  max-width: 860px;
+  padding-top: 2.2rem;
+  padding-bottom: 7rem;
+}
+
+/* ---------- Hero ---------- */
+.sd-hero {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: 1.1rem;
+  margin-bottom: 1.6rem;
+  border-bottom: 1px solid var(--sd-line);
+}
+.sd-mark {
+  flex: 0 0 auto;
+  width: 46px; height: 46px;
+  display: grid; place-items: center;
+  font-size: 1.35rem;
+  border-radius: 13px;
+  background: linear-gradient(140deg, var(--sd-accent), #7c3aed);
+  box-shadow: 0 6px 18px -6px rgba(37, 99, 235, .55);
+}
+.sd-hero h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  line-height: 1.2;
+}
+.sd-hero p {
+  margin: .2rem 0 0;
+  font-size: .89rem;
+  color: var(--sd-ink-soft);
+}
+
+/* ---------- Empty state ---------- */
+.sd-welcome {
+  border: 1px solid var(--sd-line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfdff, #ffffff);
+  padding: 1.6rem 1.7rem;
+  box-shadow: var(--sd-shadow);
+  margin-bottom: 1.5rem;
+}
+.sd-welcome h3 {
+  margin: 0 0 .45rem;
+  font-size: 1.06rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.sd-welcome p {
+  margin: 0;
+  font-size: .89rem;
+  line-height: 1.6;
+  color: var(--sd-ink-soft);
+}
+.sd-eyebrow {
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--sd-muted);
+  margin: 1.6rem 0 .55rem;
+}
+
+/* Suggestion chips: real Streamlit buttons, restyled. */
+[data-testid="stMain"] .stButton > button {
+  width: 100%;
+  text-align: left;
+  justify-content: flex-start;
+  white-space: normal;
+  height: auto;
+  min-height: 3rem;
+  padding: .7rem .95rem;
+  font-size: .875rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--sd-ink);
+  background: #ffffff;
+  border: 1px solid var(--sd-line);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  transition: border-color .16s ease, box-shadow .16s ease,
+              transform .16s ease, color .16s ease;
+}
+[data-testid="stMain"] .stButton > button:hover {
+  border-color: #bfd3fb;
+  color: var(--sd-accent-2);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px -14px rgba(37, 99, 235, .55);
+}
+[data-testid="stMain"] .stButton > button:active { transform: translateY(0); }
+[data-testid="stMain"] .stButton > button p {
+  font-size: .875rem;
+  font-weight: 500;
+}
+
+/* ---------- Chat ---------- */
+[data-testid="stChatMessage"] {
+  background: transparent;
+  padding: .35rem 0 .1rem;
+  gap: .8rem;
+}
+/* The assistant's answer sits on a card; the question stays plain. */
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarCustom"])
+  [data-testid="stChatMessageContent"] {
+  background: #ffffff;
+}
+[data-testid="stChatMessageAvatarUser"],
+[data-testid="stChatMessageAvatarCustom"] {
+  border-radius: 10px;
+}
+[data-testid="stChatMessage"] p,
+[data-testid="stChatMessage"] li {
+  font-size: .945rem;
+  line-height: 1.68;
+  color: var(--sd-ink);
+}
+
+/* Citation markers like [1] in the answer text. */
+.sd-answer-note {
+  margin-top: .9rem;
+  font-size: .78rem;
+  color: var(--sd-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Confidence badge: how well supported the answer is, without opening a source. */
+.sd-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .38rem;
+  margin-top: .85rem;
+  font-size: .72rem;
+  font-weight: 600;
+  padding: .2rem .55rem;
+  border-radius: 99px;
+  font-variant-numeric: tabular-nums;
+}
+.sd-badge-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.sd-badge--ok   { color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; }
+.sd-badge--warn { color: #92400e; background: #fffbeb; border: 1px solid #fde68a; }
+.sd-badge--bad  { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; }
+
+/* Recent questions: quiet list of past questions, each re-askable. */
+[class*="st-key-recent-"] button {
+  text-align: left !important;
+  justify-content: flex-start !important;
+  white-space: normal !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: .35rem .5rem !important;
+  font-size: .82rem !important;
+  font-weight: 400 !important;
+  color: var(--sd-ink-soft) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+[class*="st-key-recent-"] button:hover {
+  color: var(--sd-accent-2) !important;
+  background: var(--sd-surface) !important;
+  border-color: var(--sd-line) !important;
+  transform: none !important;
+}
+
+/* The copy icon at the end of an answer lives in a small iframe (only the
+   browser can reach the clipboard). Pull it tight against the answer so it
+   reads as part of it, not as a separate block. */
+[data-testid="stIFrame"] {
+  margin-top: -.3rem;
+  margin-bottom: -.6rem;
+}
+
+/* ---------- Sources ---------- */
+.sd-sources-label {
+  display: flex; align-items: center; gap: .45rem;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--sd-muted);
+  margin: 1.15rem 0 .5rem;
+}
+.sd-sources-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--sd-line);
+}
+
+[data-testid="stExpander"] {
+  border: 1px solid var(--sd-line) !important;
+  border-radius: 12px !important;
+  background: #ffffff;
+  margin-bottom: .5rem;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+[data-testid="stExpander"]:hover {
+  border-color: #cfdcf7 !important;
+  box-shadow: 0 8px 20px -16px rgba(15, 23, 42, .35);
+}
+[data-testid="stExpander"] summary {
+  padding: .62rem .85rem !important;
+  font-size: .84rem !important;
+  font-weight: 600;
+}
+[data-testid="stExpander"] summary:hover { color: var(--sd-accent-2); }
+[data-testid="stExpander"] summary p {
+  font-size: .84rem !important;
+  font-weight: 600;
+}
+
+.sd-cite-meter {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin: -.15rem 0 .7rem;
+}
+.sd-cite-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 99px;
+  background: #eef2f7;
+  overflow: hidden;
+}
+.sd-cite-fill {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #60a5fa, var(--sd-accent));
+}
+.sd-cite-strength {
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--sd-ink-soft);
+  white-space: nowrap;
+  /* Scores are read down a column of sources — tabular keeps them aligned. */
+  font-variant-numeric: tabular-nums;
+}
+.sd-quote {
+  font-size: .875rem;
+  line-height: 1.66;
+  color: var(--sd-ink-soft);
+  border-left: 3px solid #dbe6fb;
+  background: var(--sd-surface);
+  border-radius: 0 8px 8px 0;
+  padding: .7rem .9rem;
+  margin: 0;
+}
+
+/* ---------- Document library table ---------- */
+/* Built from st.columns rather than st.dataframe, because each row needs real
+   buttons and a dataframe cannot hold them. */
+.sd-th {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--sd-muted);
+  padding: 0 0 .1rem;
+}
+.sd-td {
+  font-size: .84rem;
+  color: var(--sd-ink-soft);
+  padding: .1rem 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sd-td--name { font-weight: 500; color: var(--sd-ink); }
+.sd-num { font-variant-numeric: tabular-nums; }
+.sd-muted { color: var(--sd-muted); font-variant-numeric: tabular-nums; }
+
+/* Status tag */
+.sd-tag {
+  display: inline-block;
+  font-size: .7rem;
+  font-weight: 600;
+  padding: .16rem .5rem;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.sd-tag--ok   { color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; }
+.sd-tag--warn { color: #92400e; background: #fffbeb; border: 1px solid #fde68a; }
+.sd-tag--bad  { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; }
+
+/* Row action icons: quiet until hovered, so a long table stays calm.
+   Targeted by widget key (Streamlit adds an st-key-<key> class) rather than by
+   "a button inside a column" — the suggestion chips on the Ask page also sit
+   in columns, and a looser selector would flatten those too. */
+[class*="st-key-view-"] button,
+[class*="st-key-redo-"] button,
+[class*="st-key-del-"] button {
+  min-height: 0 !important;
+  padding: .25rem !important;
+  font-size: .85rem;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  opacity: .5;
+  transform: none !important;
+  transition: opacity .15s ease, background .15s ease;
+}
+[class*="st-key-view-"] button:hover,
+[class*="st-key-redo-"] button:hover {
+  opacity: 1;
+  background: #f1f5f9 !important;
+  border-color: var(--sd-line) !important;
+  transform: none !important;
+}
+/* Delete is the destructive one — it turns red rather than grey. */
+[class*="st-key-del-"] button:hover {
+  opacity: 1;
+  background: #fef2f2 !important;
+  border-color: #fecaca !important;
+  transform: none !important;
+}
+
+/* Three tiles side by side instead of the sidebar's two. */
+.sd-stats--wide { margin-bottom: 1.4rem; }
+.sd-stats--wide .sd-stat { padding: .8rem .95rem; }
+.sd-stats--wide .sd-stat b { font-size: 1.5rem; }
+
+/* A tile holding a file name rather than a number: smaller, and allowed to
+   wrap, since "performance_review_process.pdf" will not fit on one line. */
+.sd-stats--wide .sd-stat--text b {
+  font-size: .88rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0;
+  word-break: break-word;
+}
+
+/* Lines up the danger button with the inputs beside it. */
+.sd-spacer { height: 1.72rem; }
+
+/* ---------- About: architecture diagram ---------- */
+/* Drawn with boxes and borders rather than an image, so it scales with the
+   text and stays legible at any width. */
+.sd-arch { margin: .2rem 0 .4rem; }
+.sd-layer {
+  border: 1px solid var(--sd-line);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: .8rem .95rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+}
+.sd-layer-head {
+  display: flex;
+  align-items: baseline;
+  gap: .55rem;
+  margin-bottom: .55rem;
+}
+.sd-layer-head b { font-size: .9rem; font-weight: 600; letter-spacing: -.01em; }
+.sd-layer-head span { font-size: .74rem; color: var(--sd-muted); }
+
+.sd-chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+.sd-chip {
+  font-size: .73rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  color: var(--sd-ink-soft);
+  background: var(--sd-surface);
+  border: 1px solid var(--sd-line);
+  border-radius: 6px;
+  padding: .16rem .42rem;
+}
+
+/* The connector between two layers. */
+.sd-link {
+  position: relative;
+  height: 26px;
+  margin-left: 1.4rem;
+  border-left: 2px solid #d7e0ee;
+}
+.sd-link span {
+  position: absolute;
+  left: .6rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: .66rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--sd-muted);
+  background: #ffffff;
+  padding: 0 .3rem;
+}
+
+/* ---------- About: RAG pipeline flow ---------- */
+.sd-flow { margin: .2rem 0 1.4rem; }
+.sd-step {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  border: 1px solid var(--sd-line);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: .7rem .9rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+.sd-step:hover {
+  border-color: #cfdcf7;
+  box-shadow: 0 8px 20px -16px rgba(15, 23, 42, .35);
+}
+.sd-step-num {
+  flex: 0 0 auto;
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  font-size: .76rem;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(140deg, var(--sd-accent), #7c3aed);
+  font-variant-numeric: tabular-nums;
+}
+.sd-step-body { flex: 1; min-width: 0; }
+.sd-step-body h4 {
+  margin: 0;
+  font-size: .88rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: var(--sd-ink);
+}
+.sd-step-body p {
+  margin: .15rem 0 0;
+  font-size: .8rem;
+  line-height: 1.5;
+  color: var(--sd-ink-soft);
+}
+.sd-step-tech {
+  flex: 0 0 auto;
+  font-size: .7rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  color: var(--sd-accent-2);
+  background: #eff4ff;
+  border: 1px solid #dbe6fb;
+  border-radius: 6px;
+  padding: .18rem .45rem;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sd-step-arrow {
+  text-align: center;
+  font-size: 1rem;
+  line-height: 1;
+  padding: .3rem 0;
+  color: #b9c6d9;
+}
+
+/* Narrow screens: let the stage stack instead of squeezing the text. */
+@media (max-width: 640px) {
+  .sd-step { flex-wrap: wrap; }
+  .sd-step-tech { max-width: 100%; margin-left: 2.6rem; }
+}
+
+/* ---------- About: tech stack ---------- */
+.sd-tech-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: .6rem;
+  margin: .2rem 0 .4rem;
+}
+.sd-tech {
+  border: 1px solid var(--sd-line);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: .85rem .95rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+}
+.sd-tech-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-bottom: .35rem;
+}
+.sd-tech-head b { font-size: .88rem; font-weight: 600; letter-spacing: -.01em; }
+.sd-tech-head span {
+  font-size: .66rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--sd-muted);
+  white-space: nowrap;
+}
+.sd-tech p {
+  margin: 0;
+  font-size: .79rem;
+  line-height: 1.55;
+  color: var(--sd-ink-soft);
+}
+
+/* ---------- Sidebar ---------- */
+[data-testid="stSidebar"] {
+  background: var(--sd-surface);
+  border-right: 1px solid var(--sd-line);
+}
+[data-testid="stSidebar"] .block-container,
+[data-testid="stSidebarUserContent"] { padding-top: 1.6rem; }
+[data-testid="stSidebar"] h2 {
+  font-size: .74rem !important;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--sd-muted);
+  padding: 0 0 .3rem !important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] {
+  background: #ffffff;
+}
+[data-testid="stSidebar"] .stButton > button {
+  width: 100%;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--sd-ink-soft);
+  background: #ffffff;
+  border: 1px solid var(--sd-line);
+  border-radius: 10px;
+  transition: all .16s ease;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+  color: #b91c1c;
+  border-color: #fbcfcf;
+  background: #fff7f7;
+}
+
+.sd-status {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .62rem .8rem;
+  border-radius: 11px;
+  border: 1px solid var(--sd-line);
+  background: #ffffff;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--sd-ink);
+  margin-bottom: .9rem;
+}
+.sd-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.sd-dot--live {
+  background: var(--sd-good);
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, .16);
+  animation: sd-pulse 2.2s ease-in-out infinite;
+}
+.sd-dot--warn { background: var(--sd-warn); box-shadow: 0 0 0 3px rgba(180, 83, 9, .15); }
+.sd-dot--down { background: #dc2626; box-shadow: 0 0 0 3px rgba(220, 38, 38, .15); }
+@keyframes sd-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(5, 150, 105, .16); }
+  50%      { box-shadow: 0 0 0 6px rgba(5, 150, 105, .04); }
+}
+
+.sd-stats { display: flex; gap: .5rem; margin-bottom: 1.1rem; }
+.sd-stat {
+  flex: 1;
+  background: #ffffff;
+  border: 1px solid var(--sd-line);
+  border-radius: 11px;
+  padding: .6rem .7rem;
+}
+.sd-stat b {
+  display: block;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+  color: var(--sd-ink);
+  /* Equal-width digits so the two tiles' numbers sit on the same rhythm. */
+  font-variant-numeric: tabular-nums;
+}
+.sd-stat span {
+  font-size: .66rem;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--sd-muted);
+}
+
+.sd-doc {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .5rem .65rem;
+  margin-bottom: .32rem;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: .8rem;
+  color: var(--sd-ink-soft);
+  background: #ffffff;
+  transition: all .15s ease;
+}
+.sd-doc:hover {
+  border-color: #d8e3f8;
+  color: var(--sd-ink);
+  transform: translateX(2px);
+}
+.sd-doc em {
+  font-style: normal;
+  font-size: .9rem;
+  opacity: .75;
+}
+.sd-doc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sd-kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: .78rem;
+  padding: .3rem 0;
+  border-bottom: 1px dashed var(--sd-line);
+}
+.sd-kv:last-child { border-bottom: 0; }
+.sd-kv span { color: var(--sd-muted); }
+.sd-kv b { font-weight: 600; color: var(--sd-ink); }
+
+.sd-footnote {
+  font-size: .74rem;
+  line-height: 1.55;
+  color: var(--sd-muted);
+  margin-top: 1.1rem;
+}
+
+/* Plain-English explanation under a status pill. */
+.sd-hint {
+  font-size: .79rem;
+  line-height: 1.55;
+  color: var(--sd-ink-soft);
+  margin: -.45rem 0 .8rem;
+  padding: 0 .1rem;
+}
+
+/* The "Technical details" panel is for whoever runs the app, not whoever
+   reads it — keep it visually recessive. */
+[data-testid="stSidebar"] [data-testid="stExpander"] summary p {
+  font-size: .76rem !important;
+  color: var(--sd-muted);
+}
+
+/* ---------- Chat input ---------- */
+[data-testid="stBottomBlockContainer"] {
+  background: linear-gradient(180deg, rgba(255,255,255,0), #ffffff 32%);
+  padding-bottom: 1.3rem;
+}
+[data-testid="stChatInput"] {
+  border: 1px solid #dbe2ec !important;
+  border-radius: 14px !important;
+  background: #ffffff !important;
+  box-shadow: var(--sd-shadow);
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+[data-testid="stChatInput"]:focus-within {
+  border-color: var(--sd-accent) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .13);
+}
+
+/* The container above is the ONLY thing that draws a border or a focus ring.
+   Streamlit wraps the textarea in BaseWeb elements that draw their own border
+   on focus, and the textarea itself takes a browser outline — stacked with the
+   container's, that showed as two concentric blue lines. Flatten them all and
+   let the container's white background show through. */
+[data-testid="stChatInput"] [data-baseweb="base-input"],
+[data-testid="stChatInput"] [data-baseweb="textarea"],
+[data-testid="stChatInput"] [data-baseweb="input"],
+[data-testid="stChatInputTextArea"] {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+[data-testid="stChatInputTextArea"]:focus,
+[data-testid="stChatInputTextArea"]:focus-visible,
+[data-testid="stChatInputTextArea"]:focus-within {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+[data-testid="stChatInput"] textarea { font-size: .93rem !important; }
+
+/* Alerts: flatter, less shouty than the defaults. */
+[data-testid="stAlert"] {
+  border-radius: 11px;
+  border: 1px solid var(--sd-line);
+  font-size: .875rem;
+}
+
+/* Tidy scrollbars to match. */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb {
+  background: #d7dee8;
+  border-radius: 99px;
+  border: 2px solid #ffffff;
+}
+::-webkit-scrollbar-thumb:hover { background: #bcc7d6; }
+::-webkit-scrollbar-track { background: transparent; }
+
+#MainMenu, footer { visibility: hidden; }
