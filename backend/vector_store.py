@@ -19,7 +19,15 @@ from typing import Dict, List
 import chromadb
 from chromadb.utils import embedding_functions
 
-from backend.config import CHROMA_DIR, COLLECTION_NAME, EMBEDDING_MODEL, MAX_DISTANCE, TOP_K
+from backend.config import (
+    CANDIDATE_K,
+    CHROMA_DIR,
+    COLLECTION_NAME,
+    EMBEDDING_MODEL,
+    MAX_DISTANCE,
+    RELATIVE_MARGIN,
+    TOP_K,
+)
 
 # Loading the embedding model takes a few seconds, so we do it once and reuse it.
 _collection = None
@@ -87,40 +95,67 @@ def rebuild(chunks: List[Dict], batch_size: int = 100) -> int:
 def search(question: str, top_k: int = TOP_K) -> List[Dict]:
     """Find the chunks most similar in meaning to the question.
 
-    Chunks further away than MAX_DISTANCE are dropped. Chroma always returns
-    its top_k nearest neighbours even when nothing is relevant, so without this
-    filter an off-topic question would still arrive at the LLM with four
-    confident-looking but unrelated paragraphs attached.
+    Two stages, because one threshold cannot answer both questions that matter.
+
+    Stage 1 - absolute. Chroma always returns its nearest neighbours even when
+    nothing is relevant, so an off-topic question would otherwise arrive at the
+    LLM with four confident-looking but unrelated paragraphs attached. Anything
+    further away than MAX_DISTANCE is not about the subject at all, and goes.
+
+    Stage 2 - relative. Surviving stage 1 only means a chunk is on-topic; it
+    says nothing about whether it is *as good as* what else we found. A chunk
+    at 0.73 and a chunk at 0.28 both pass, and both used to be handed to the
+    model as equally-weighted numbered sources. Here we keep only the chunks
+    within RELATIVE_MARGIN of the best one, so how many come back depends on
+    how many are genuinely good rather than being fixed at four.
     """
     collection = get_collection()
-    if collection.count() == 0:
+    total = collection.count()
+    if total == 0:
         return []
 
+    # Search wider than we intend to return. Narrowing happens below, and a
+    # chunk cannot be considered by a filter that never received it.
     response = collection.query(
         query_texts=[question],
-        n_results=min(top_k, collection.count()),
+        n_results=min(CANDIDATE_K, total),
     )
 
-    results = []
-    for text, metadata, distance in zip(
-        response["documents"][0],
-        response["metadatas"][0],
-        response["distances"][0],
-    ):
-        if distance > MAX_DISTANCE:
-            continue
-        results.append(
-            {
-                "text": text,
-                "source": metadata["source"],
-                "page": metadata["page"],
-                "section": metadata.get("section", ""),
-                # Turn distance into a 0-1 "how relevant is this" score that is
-                # easier to read in the UI than a raw cosine distance.
-                "score": round(max(0.0, 1 - distance / 2), 3),
-            }
+    # Stage 1. Chroma returns these already sorted nearest-first, and the two
+    # stages below both rely on that order.
+    candidates = [
+        (distance, text, metadata)
+        for text, metadata, distance in zip(
+            response["documents"][0],
+            response["metadatas"][0],
+            response["distances"][0],
         )
-    return results
+        if distance <= MAX_DISTANCE
+    ]
+    if not candidates:
+        return []
+
+    # Stage 2, measured from the closest chunk this particular question found.
+    # A fixed number here would defeat the point: the margin has to be judged
+    # against the best available answer, not against the corpus as a whole.
+    best = candidates[0][0]
+    kept = [c for c in candidates if c[0] <= best + RELATIVE_MARGIN]
+
+    return [
+        {
+            "text": text,
+            "source": metadata["source"],
+            "page": metadata["page"],
+            "section": metadata.get("section", ""),
+            # Turn distance into a 0-1 "how relevant is this" score that is
+            # easier to read in the UI than a raw cosine distance.
+            "score": round(max(0.0, 1 - distance / 2), 3),
+        }
+        # top_k stays as a ceiling: the relative filter decides the usual case,
+        # but a question matching a dozen near-identical chunks must still not
+        # flood the prompt.
+        for distance, text, metadata in kept[:top_k]
+    ]
 
 
 def stats() -> Dict:

@@ -50,6 +50,11 @@ CHUNK_OVERLAP = 150
 # then has to ignore.
 TOP_K = 4
 
+# How many chunks to pull out of Chroma before filtering down to TOP_K.
+# Searching wider than we return means a good chunk sitting at rank 6 still gets
+# a chance; asking for only 4 discarded it before any filter could see it.
+CANDIDATE_K = 12
+
 # Chroma returns a cosine distance: 0.0 = identical, 2.0 = opposite.
 # Anything above this is treated as "not really about the question" and is
 # dropped. This is what makes out-of-scope questions answer "I don't know"
@@ -66,6 +71,19 @@ TOP_K = 4
 # phrased worse than any we tested, while still rejecting all 8 off-topic ones.
 # Re-measure this if you swap in a very different corpus - the gap moves.
 MAX_DISTANCE = 0.75
+
+# The second filter. MAX_DISTANCE asks "is this chunk about the subject at all?"
+# and cannot tell that a chunk at 0.73 is far worse than one at 0.28 - both are
+# under the bar. This asks the relative question instead: a chunk is kept only
+# if it is within this distance of the *best* chunk found for that question.
+# So the number of chunks returned varies with how many are genuinely good,
+# rather than being fixed at four.
+#
+# 0.30 was measured, like MAX_DISTANCE. Below 0.25 nearly every question
+# collapsed to a single chunk, which splits a policy from its condition
+# ("21 days leave" / "...after probation"). Above 0.35 the count jumped to the
+# TOP_K ceiling everywhere, so the filter stopped filtering.
+RELATIVE_MARGIN = 0.30
 
 
 # --- Models ------------------------------------------------------------------

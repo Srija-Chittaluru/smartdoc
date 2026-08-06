@@ -84,23 +84,33 @@ def show_upload_results():
     if not results:
         return
 
-    for result in results:
-        name = result["name"]
-        status = result["status"]
-        detail = result.get("detail", "This file could not be indexed.")
+    # The messages sit beside a close button, so they can be dismissed as soon
+    # as they have been read rather than lingering until the next action.
+    messages, close = st.columns([24, 1], vertical_alignment="top")
 
-        if status == "indexed":
-            st.success(f"**{name}** — indexed into {result['chunks']} chunks.")
-        elif status == "duplicate":
-            st.warning(f"**{name}** — skipped, {detail}.")
-        elif status in REJECTED_AS_WARNING:
-            st.warning(f"**{name}** — {detail}")
-        elif status in REJECTED_AS_ERROR:
-            st.error(f"**{name}** — {detail}")
-        else:
-            # An outcome added to the backend but not yet described here still
-            # reports something useful rather than nothing.
-            st.warning(f"**{name}** — {detail}")
+    with messages:
+        for result in results:
+            name = result["name"]
+            status = result["status"]
+            detail = result.get("detail", "This file could not be indexed.")
+
+            if status == "indexed":
+                st.success(f"**{name}** — indexed into {result['chunks']} chunks.")
+            elif status == "duplicate":
+                st.warning(f"**{name}** — skipped, {detail}.")
+            elif status in REJECTED_AS_WARNING:
+                st.warning(f"**{name}** — {detail}")
+            elif status in REJECTED_AS_ERROR:
+                st.error(f"**{name}** — {detail}")
+            else:
+                # An outcome added to the backend but not yet described here
+                # still reports something useful rather than nothing.
+                st.warning(f"**{name}** — {detail}")
+
+    # Nothing to delete: the results were already popped above, so rerunning
+    # is all it takes for them not to be drawn again.
+    if close.button("✕", key="dismiss-upload", help="Dismiss"):
+        st.rerun()
 
 
 # --- Totals and toolbar ------------------------------------------------------

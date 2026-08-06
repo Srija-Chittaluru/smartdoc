@@ -425,162 +425,94 @@ span[class*="material-symbols"],
 /* Lines up the danger button with the inputs beside it. */
 .sd-spacer { height: 1.72rem; }
 
-/* ---------- About: architecture diagram ---------- */
-/* Drawn with boxes and borders rather than an image, so it scales with the
-   text and stays legible at any width. */
-.sd-arch { margin: .2rem 0 .4rem; }
-.sd-layer {
-  border: 1px solid var(--sd-line);
-  border-radius: 12px;
-  background: #ffffff;
-  padding: .8rem .95rem;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+/* Close button on the upload messages: quiet, and sized to sit level with the
+   first line of the message rather than towering over it. */
+[class*="st-key-dismiss-upload"] button {
+  min-height: 0 !important;
+  padding: .3rem .45rem !important;
+  margin-top: .15rem;
+  font-size: .8rem;
+  color: var(--sd-muted) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  opacity: .6;
+  transform: none !important;
+  transition: opacity .15s ease, background .15s ease;
 }
-.sd-layer-head {
-  display: flex;
-  align-items: baseline;
-  gap: .55rem;
-  margin-bottom: .55rem;
+[class*="st-key-dismiss-upload"] button:hover {
+  opacity: 1;
+  color: var(--sd-ink) !important;
+  background: #f1f5f9 !important;
+  border-color: var(--sd-line) !important;
+  transform: none !important;
 }
-.sd-layer-head b { font-size: .9rem; font-weight: 600; letter-spacing: -.01em; }
-.sd-layer-head span { font-size: .74rem; color: var(--sd-muted); }
 
-.sd-chips { display: flex; flex-wrap: wrap; gap: .35rem; }
-.sd-chip {
-  font-size: .73rem;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+/* ---------- About page ---------- */
+/* Three sections of cards. Generous spacing on purpose: this page is read, not
+   worked in. */
+.sd-section-title {
+  margin: 2.4rem 0 .9rem;
+  font-size: 1.12rem;
+  font-weight: 600;
+  letter-spacing: -.015em;
+  color: var(--sd-ink);
+}
+.sd-section-title:first-of-type { margin-top: 1.2rem; }
+
+/* The opening paragraph. Left as plain text rather than a card, so the page
+   does not read as one unbroken wall of boxes. */
+.sd-lead {
+  max-width: 68ch;
+  margin: 0 0 .5rem;
+  font-size: .97rem;
+  line-height: 1.78;
   color: var(--sd-ink-soft);
-  background: var(--sd-surface);
-  border: 1px solid var(--sd-line);
-  border-radius: 6px;
-  padding: .16rem .42rem;
 }
 
-/* The connector between two layers. */
-.sd-link {
-  position: relative;
-  height: 26px;
-  margin-left: 1.4rem;
-  border-left: 2px solid #d7e0ee;
+/* auto-fit means three across on a wide screen, two on a tablet and one on a
+   phone, with no breakpoints to maintain. */
+.sd-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: .75rem;
+  margin-bottom: .5rem;
 }
-.sd-link span {
-  position: absolute;
-  left: .6rem;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: .66rem;
-  font-weight: 600;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--sd-muted);
-  background: #ffffff;
-  padding: 0 .3rem;
-}
-
-/* ---------- About: RAG pipeline flow ---------- */
-.sd-flow { margin: .2rem 0 1.4rem; }
-.sd-step {
-  display: flex;
-  align-items: center;
-  gap: .85rem;
+.sd-card {
   border: 1px solid var(--sd-line);
-  border-radius: 12px;
+  border-radius: 14px;
   background: #ffffff;
-  padding: .7rem .9rem;
+  padding: 1.15rem 1.2rem 1.25rem;
   box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
-  transition: border-color .16s ease, box-shadow .16s ease;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
 }
-.sd-step:hover {
+.sd-card:hover {
   border-color: #cfdcf7;
-  box-shadow: 0 8px 20px -16px rgba(15, 23, 42, .35);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px -20px rgba(15, 23, 42, .45);
 }
-.sd-step-num {
-  flex: 0 0 auto;
-  width: 26px; height: 26px;
+.sd-card-icon {
+  width: 38px; height: 38px;
   display: grid; place-items: center;
-  border-radius: 8px;
-  font-size: .76rem;
-  font-weight: 700;
-  color: #ffffff;
-  background: linear-gradient(140deg, var(--sd-accent), #7c3aed);
-  font-variant-numeric: tabular-nums;
+  margin-bottom: .8rem;
+  font-size: 1.15rem;
+  line-height: 1;
+  border-radius: 11px;
+  background: linear-gradient(150deg, #eef4ff, #f5f0ff);
+  border: 1px solid #e2e9fb;
 }
-.sd-step-body { flex: 1; min-width: 0; }
-.sd-step-body h4 {
-  margin: 0;
-  font-size: .88rem;
+.sd-card h4 {
+  margin: 0 0 .35rem;
+  font-size: .9rem;
   font-weight: 600;
+  line-height: 1.35;
   letter-spacing: -.01em;
   color: var(--sd-ink);
 }
-.sd-step-body p {
-  margin: .15rem 0 0;
-  font-size: .8rem;
-  line-height: 1.5;
-  color: var(--sd-ink-soft);
-}
-.sd-step-tech {
-  flex: 0 0 auto;
-  font-size: .7rem;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  color: var(--sd-accent-2);
-  background: #eff4ff;
-  border: 1px solid #dbe6fb;
-  border-radius: 6px;
-  padding: .18rem .45rem;
-  max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sd-step-arrow {
-  text-align: center;
-  font-size: 1rem;
-  line-height: 1;
-  padding: .3rem 0;
-  color: #b9c6d9;
-}
-
-/* Narrow screens: let the stage stack instead of squeezing the text. */
-@media (max-width: 640px) {
-  .sd-step { flex-wrap: wrap; }
-  .sd-step-tech { max-width: 100%; margin-left: 2.6rem; }
-}
-
-/* ---------- About: tech stack ---------- */
-.sd-tech-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: .6rem;
-  margin: .2rem 0 .4rem;
-}
-.sd-tech {
-  border: 1px solid var(--sd-line);
-  border-radius: 12px;
-  background: #ffffff;
-  padding: .85rem .95rem;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
-}
-.sd-tech-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: .5rem;
-  margin-bottom: .35rem;
-}
-.sd-tech-head b { font-size: .88rem; font-weight: 600; letter-spacing: -.01em; }
-.sd-tech-head span {
-  font-size: .66rem;
-  font-weight: 600;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--sd-muted);
-  white-space: nowrap;
-}
-.sd-tech p {
+.sd-card p {
   margin: 0;
-  font-size: .79rem;
-  line-height: 1.55;
+  font-size: .84rem;
+  line-height: 1.6;
   color: var(--sd-ink-soft);
 }
 
