@@ -10,15 +10,17 @@ that run *before* the API call are tested instead.
 import pytest
 
 from backend import rag, vector_store
-from backend.chunker import chunk_pdf, clean_text, looks_like_heading
+from backend.chunker import chunk_pdf, clean_text, heading_text, looks_like_heading
 from backend.config import CHUNK_SIZE, DOCUMENTS_DIR, MAX_QUESTION_LENGTH
 
 
 # --- Heading detection -------------------------------------------------------
+# Pages arrive as Markdown, so a heading is either "## Title" or a fully bold
+# line. Both forms appear in the sample documents.
 
 @pytest.mark.parametrize(
     "line",
-    ["2. Annual Leave", "3.1 Scope", "IT SECURITY POLICY", "Working from Another Country"],
+    ["## 2. Annual Leave", "### 3.1 Scope", "# IT SECURITY POLICY", "**Working from Another Country**"],
 )
 def test_recognises_headings(line):
     assert looks_like_heading(line)
@@ -29,12 +31,18 @@ def test_recognises_headings(line):
     [
         "30 minutes of inactivity.",                      # sentence fragment
         "Employees receive 12 days of paid sick leave,",   # mid-sentence
-        "ab",                                              # too short
         "Passwords must be at least 14 characters long and include upper case letters",
+        # A bold lead-in is not a heading: the sentence carries on after it.
+        "**Standard Equipment:** Available to all team members.",
     ],
 )
 def test_rejects_non_headings(line):
     assert not looks_like_heading(line)
+
+
+def test_heading_markers_are_stripped_for_the_citation():
+    assert heading_text("### Global Accessibility Definition") == "Global Accessibility Definition"
+    assert heading_text("**2. Annual Leave**") == "2. Annual Leave"
 
 
 # --- Cleaning ----------------------------------------------------------------
@@ -45,12 +53,23 @@ def test_joins_wrapped_lines_into_one_paragraph():
 
 
 def test_repairs_words_hyphenated_across_a_line_break():
-    assert "compensation" in clean_text("Annual compen-\nsation is reviewed.")
+    """The converter marks a soft hyphen as struck through, so it arrives as ~~-~~."""
+    assert "compensation" in clean_text("Annual compen ~~-~~\n\nsation is reviewed.")
+
+
+def test_keeps_struck_through_text_but_drops_the_markers():
+    assert clean_text("Contact ~~People Ops~~ HelpLab.") == "Contact People Ops HelpLab."
 
 
 def test_keeps_heading_attached_to_its_section():
-    cleaned = clean_text("2. Annual Leave\nEmployees get 21 days\nper calendar year.")
-    assert cleaned == "2. Annual Leave\nEmployees get 21 days per calendar year."
+    cleaned = clean_text("**2. Annual Leave**\n\nEmployees get 21 days\n\nper calendar year.")
+    assert cleaned == "**2. Annual Leave**\nEmployees get 21 days per calendar year."
+
+
+def test_two_blank_lines_start_a_new_paragraph():
+    """One blank line is a wrapped sentence; two is a real paragraph break."""
+    cleaned = clean_text("Working hours are\n\n9:30 to 6:30.\n\n\nLeave accrues monthly.")
+    assert cleaned == "Working hours are 9:30 to 6:30.\n\nLeave accrues monthly."
 
 
 # --- Chunking ----------------------------------------------------------------

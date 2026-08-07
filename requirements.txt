@@ -6,7 +6,12 @@ requests>=2.31
 python-multipart>=0.0.9  # lets FastAPI accept uploaded PDFs
 
 # --- PDF parsing + chunking ---
-pypdf>=4.0
+# pymupdf4llm reads a PDF as Markdown, so headings are marked rather than
+# guessed at. Note it is AGPL-3.0 (or a paid Artifex licence): free to use and
+# to modify, but distributing a closed-source product built on it is not
+# permitted. Swap to Docling (MIT) if that ever becomes a problem.
+pymupdf4llm>=0.0.20
+pypdf>=4.0               # still used to validate and count pages on upload
 langchain-text-splitters>=0.2
 
 # --- Vector database (persisted to disk) ---

@@ -3,60 +3,40 @@
 Each chunk remembers which file and which page it came from, plus the section
 heading it sits under. That metadata is what lets every answer show a real
 citation instead of just "somewhere in the docs".
+
+Pages are read as Markdown rather than plain text. A PDF carries no structure,
+so recognising a heading used to mean guessing from how a line read - short,
+Title Case, no full stop. Markdown states it outright, either as "## Heading" or
+as a line that is entirely bold, so the guessing is gone and a section can be
+split at the boundary its author intended.
 """
 
 import re
 from pathlib import Path
 from typing import Dict, List
 
+import pymupdf4llm
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pypdf import PdfReader
 
 from backend.config import CHUNK_OVERLAP, CHUNK_SIZE
 
 # Chunks shorter than this are usually page numbers or stray headers.
 MIN_CHUNK_LENGTH = 50
 
-# Words we do not expect to be capitalised in a Title Case heading.
-SMALL_WORDS = {
-    "a", "an", "and", "the", "of", "or", "to", "for", "in", "on", "with",
-    "at", "by", "from", "per", "as", "is", "not", "vs",
-}
+# A line that is nothing but bold text. PDFs whose sections are bold rather than
+# larger arrive this way instead of as "##".
+BOLD_LINE = re.compile(r"\*\*[^*]+\*\*")
 
 
 def looks_like_heading(line: str) -> bool:
-    """Decide whether a single line of extracted text is a section title.
-
-    PDFs carry no structure, so a heading has to be recognised by how it reads.
-    Headings in policy documents are short, unpunctuated at the end, and are
-    either numbered ("2. Annual Leave"), ALL CAPS, or Title Case.
-
-    The test is deliberately strict. A false positive would split a sentence out
-    of its paragraph, which is worse than missing a heading - if we miss one,
-    the citation still carries the correct document and page number.
-    """
+    """Is this line a section title? Markdown says so directly."""
     line = line.strip()
-    words = line.split()
+    return line.startswith("#") or bool(BOLD_LINE.fullmatch(line))
 
-    if not (3 < len(line) < 70) or not (1 <= len(words) <= 10):
-        return False
 
-    # Prose ends in punctuation; titles do not. This one test is what keeps
-    # fragments like "30 minutes of inactivity." from being read as headings.
-    if line.endswith((".", ",", ";", ":")):
-        return False
-
-    # "2. Annual Leave" or "3.1 Scope" - a number, then a capitalised word.
-    numbered = bool(re.match(r"^\d+(\.\d+)*[\.\)]?\s+[A-Z]", line))
-
-    if numbered or line.isupper():
-        return True
-
-    # Title Case: every significant word starts with a capital letter.
-    alpha_words = [w for w in words if w[0].isalpha()]
-    if len(alpha_words) < 2:
-        return False
-    return all(w[0].isupper() or w.lower() in SMALL_WORDS for w in alpha_words)
+def heading_text(line: str) -> str:
+    """A heading without its Markdown markers, for a readable citation."""
+    return re.sub(r"[*#]", "", line).strip()
 
 
 def _shape(line: str) -> str:
@@ -87,37 +67,39 @@ def find_page_furniture(pages: List[str], min_share: float = 0.5) -> set:
 
 
 def clean_text(raw: str) -> str:
-    """Rebuild readable paragraphs from raw PDF text.
+    """Rebuild readable paragraphs from one page of Markdown.
 
-    PDF extraction returns one line per *visual* line, so a single sentence
-    arrives broken across three lines. We join those wrapped lines back into
-    paragraphs, while keeping each heading on its own line so that the heading
-    stays attached to the section it introduces.
+    The converter emits one line per *visual* line, separated by a blank line,
+    and separates real paragraphs by two. So three-or-more newlines is where a
+    paragraph actually starts; a single blank line is just a wrapped sentence,
+    and we join it back up.
+
+    Headings stay on their own line so each one remains attached to the section
+    it introduces.
     """
-    # "compen-\nsation" -> "compensation" (words hyphenated across a line break)
-    text = re.sub(r"-\n(\w)", r"\1", raw)
+    # A word hyphenated across a line break arrives as "anti ~~-~~\n\ndiscrimination",
+    # because the converter marks the soft hyphen as struck through. Closing the
+    # break rebuilds the word.
+    text = re.sub(r"\s*~~-~~\s*\n\s*\n\s*", "", raw)
+    # Any other struck-through run is real text; keep it, drop the markers.
+    text = text.replace("~~", "")
 
     # A block is one section: an optional heading plus the lines under it.
     blocks: List[Dict] = []
 
-    for line in text.split("\n"):
-        line = re.sub(r"[ \t]+", " ", line).strip()
+    for paragraph in re.split(r"\n{3,}", text):
+        blocks.append({"heading": "", "lines": []})
 
-        if not line:
-            # A blank line ends the current paragraph.
-            blocks.append({"heading": "", "lines": []})
-        elif looks_like_heading(line):
-            # Note: a title long enough to wrap onto two visual lines becomes
-            # two headings here. We accept that rather than merging consecutive
-            # headings, because merging also glues a document title onto the
-            # first real section, which is worse. Every heading reported this
-            # way is a literal line from the page.
-            blocks.append({"heading": line, "lines": []})
-        else:
-            if not blocks:
-                blocks.append({"heading": "", "lines": []})
-            # A wrapped line: join it onto the paragraph being built.
-            blocks[-1]["lines"].append(line)
+        for line in paragraph.split("\n"):
+            line = re.sub(r"[ \t]+", " ", line).strip()
+
+            if not line:
+                continue
+            if looks_like_heading(line):
+                blocks.append({"heading": line, "lines": []})
+            else:
+                # A wrapped line: join it onto the paragraph being built.
+                blocks[-1]["lines"].append(line)
 
     # Inside a block: heading on line 1, its paragraph joined onto line 2, so
     # the two stay together in the same chunk.
@@ -142,7 +124,7 @@ def find_section(page_text: str, chunk: str) -> str:
     hotels would send the reader to the wrong paragraph.
     """
     headings = [
-        line.strip() for line in chunk.split("\n") if looks_like_heading(line.strip())
+        heading_text(line) for line in chunk.split("\n") if looks_like_heading(line)
     ]
     if headings:
         # A chunk covering many short sections would produce an unreadable
@@ -160,26 +142,36 @@ def find_section(page_text: str, chunk: str) -> str:
     heading = ""
     for line in page_text[:position].split("\n"):
         if looks_like_heading(line):
-            heading = line.strip()
+            heading = heading_text(line)
     return heading
 
 
 def chunk_pdf(pdf_path: Path) -> List[Dict]:
     """Read one PDF and return its chunks, each with citation metadata."""
-    reader = PdfReader(str(pdf_path))
-
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
-        # Break at the most natural boundary available, in this order:
-        # between sections, then between heading and body, then sentence,
+        is_separator_regex=True,
+        # Break at the most natural boundary available, in this order: at a
+        # heading, then between paragraphs, then between lines, then sentence,
         # then word, then raw character.
-        separators=["\n\n", "\n", ". ", " ", ""],
+        #
+        # The heading rule is what Markdown buys us. Without it the splitter
+        # packs to 800 characters and a chunk can open with the tail of the
+        # previous section - which is how the accessibility definition ended up
+        # behind 200 characters about reporting family relationships, and stopped
+        # being retrievable at all.
+        separators=[r"\n(?=#|\*\*)", r"\n\n", r"\n", r"\. ", " ", ""],
     )
 
-    # Read every page up front: the repeated header and footer can only be
-    # recognised by comparing pages against each other.
-    raw_pages = [page.extract_text() or "" for page in reader.pages]
+    # page_chunks keeps one entry per page. The plain string form would be
+    # easier, but it flattens the document and the page number - which every
+    # citation depends on - would be gone.
+    raw_pages = [
+        page["text"] for page in pymupdf4llm.to_markdown(str(pdf_path), page_chunks=True)
+    ]
+    # The repeated header and footer can only be recognised by comparing pages
+    # against each other, so this needs all of them in hand.
     furniture = find_page_furniture(raw_pages)
 
     chunks = []
