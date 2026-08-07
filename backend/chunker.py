@@ -59,6 +59,33 @@ def looks_like_heading(line: str) -> bool:
     return all(w[0].isupper() or w.lower() in SMALL_WORDS for w in alpha_words)
 
 
+def _shape(line: str) -> str:
+    """A line with its digits blanked, so "page 3/14" and "page 8/14" match."""
+    return re.sub(r"\d+", "#", line.strip())
+
+
+def find_page_furniture(pages: List[str], min_share: float = 0.5) -> set:
+    """Find the running headers and footers to strip before chunking.
+
+    A PDF printed from a web page repeats a title line and a URL on every page.
+    Those lines are short and full of the document's own keywords, so they embed
+    as a near-perfect match for any question about the document - and being
+    their own chunks, they crowd the real content out of the top results.
+
+    A line is furniture if it appears on at least half the pages. Digits are
+    ignored when comparing, because the page number is the one part that
+    changes. The three-page floor means a short document, where a heading could
+    legitimately appear on every page, is left alone.
+    """
+    seen_on: Dict[str, int] = {}
+    for text in pages:
+        for shape in {_shape(line) for line in text.split("\n") if line.strip()}:
+            seen_on[shape] = seen_on.get(shape, 0) + 1
+
+    threshold = max(3, int(len(pages) * min_share))
+    return {shape for shape, count in seen_on.items() if count >= threshold}
+
+
 def clean_text(raw: str) -> str:
     """Rebuild readable paragraphs from raw PDF text.
 
@@ -150,12 +177,20 @@ def chunk_pdf(pdf_path: Path) -> List[Dict]:
         separators=["\n\n", "\n", ". ", " ", ""],
     )
 
+    # Read every page up front: the repeated header and footer can only be
+    # recognised by comparing pages against each other.
+    raw_pages = [page.extract_text() or "" for page in reader.pages]
+    furniture = find_page_furniture(raw_pages)
+
     chunks = []
     # We split page by page rather than treating the PDF as one long string.
     # It costs us overlap across a page boundary, but it buys an exact page
     # number for every chunk - which is what makes a citation verifiable.
-    for page_number, page in enumerate(reader.pages, start=1):
-        page_text = clean_text(page.extract_text() or "")
+    for page_number, raw in enumerate(raw_pages, start=1):
+        body = "\n".join(
+            line for line in raw.split("\n") if _shape(line) not in furniture
+        )
+        page_text = clean_text(body)
         if not page_text:
             continue  # Scanned image page with no text layer - nothing to index.
 
