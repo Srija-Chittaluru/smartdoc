@@ -20,6 +20,22 @@ NO_ANSWER_MESSAGE = (
     "The uploaded documents do not contain enough information to answer this question."
 )
 
+# The first entry of the document picker. Selecting it searches everything,
+# which is what the app has always done.
+ALL_DOCUMENTS = "All Documents"
+
+
+def no_answer_message(source) -> str:
+    """The refusal, naming the chosen document when there is one.
+
+    A question scoped to one PDF is never answered from another, so saying "the
+    uploaded documents" would be misleading - only one of them was read.
+    """
+    if not source:
+        return NO_ANSWER_MESSAGE
+    return f"{source} does not contain enough information to answer this question."
+
+
 SUGGESTED_QUESTIONS = [
     "How many days of annual leave do I get?",
     "What is the policy on working remotely from abroad?",
@@ -30,6 +46,34 @@ SUGGESTED_QUESTIONS = [
 # How many earlier turns to send, and how many past questions to offer back.
 HISTORY_TURNS = 3
 RECENT_LIMIT = 6
+
+
+# --- Choosing what to search -------------------------------------------------
+
+
+def document_picker():
+    """The document selector. Returns the chosen filename, or None for all.
+
+    The names come from the index rather than from disk, so a PDF that is saved
+    but not yet indexed cannot be picked and then answer nothing. Nothing is
+    drawn while the library is empty or unreachable - there would be nothing to
+    choose between.
+    """
+    health, error = api.get_health()
+    names = (health or {}).get("documents", [])
+    if error or not names:
+        return None
+
+    picker, _ = st.columns([1, 2], gap="small")
+    with picker:
+        # The key keeps the choice across the rerun that asking triggers.
+        chosen = st.selectbox(
+            "Document",
+            [ALL_DOCUMENTS] + names,
+            key="ask_document",
+            help="Answer from one document only, or from every indexed document.",
+        )
+    return None if chosen == ALL_DOCUMENTS else chosen
 
 
 # --- Conversation state ------------------------------------------------------
@@ -89,7 +133,7 @@ def show_past_message(message: dict):
             draw_answer(message)
 
 
-def stream_new_answer(question: str) -> dict:
+def stream_new_answer(question: str, source=None) -> dict:
     """Ask the backend, streaming the answer in. Returns the message to keep.
 
     The generator handed to st.write_stream yields only text; everything else
@@ -98,7 +142,9 @@ def stream_new_answer(question: str) -> dict:
     received = {}
 
     def text_pieces():
-        for event in api.ask_question_streamed(question, conversation_history()):
+        for event in api.ask_question_streamed(
+            question, conversation_history(), source
+        ):
             kind = event.get("type")
             if kind == "token":
                 yield event["text"]
@@ -132,10 +178,13 @@ def stream_new_answer(question: str) -> dict:
         # Nothing relevant found, or nothing indexed at all. Both are "no
         # answer", so both get the same fixed sentence.
         if status in ("no_match", "no_documents"):
-            st.warning(NO_ANSWER_MESSAGE)
+            # Named per document: a scoped question was only ever searched
+            # against that one file, so the refusal has to say so.
+            refusal = no_answer_message(source if status == "no_match" else None)
+            st.warning(refusal)
             if status == "no_documents":
                 st.caption("The document library is empty.")
-            return {"role": "assistant", "content": NO_ANSWER_MESSAGE, "answered": False}
+            return {"role": "assistant", "content": refusal, "answered": False}
 
         # A setup problem - a missing key, say. Retrieval still worked, so show
         # what it found.
@@ -169,6 +218,8 @@ components.page_header(
 
 if "chat" not in st.session_state:
     st.session_state.chat = []
+
+selected_document = document_picker()
 
 # Resolved before anything is drawn: a question from a button has to replace the
 # empty state on this run, not the next one. st.chat_input pins itself to the
@@ -210,4 +261,4 @@ if question:
     with st.chat_message("user", avatar="🧑"):
         st.markdown(question)
 
-    st.session_state.chat.append(stream_new_answer(question))
+    st.session_state.chat.append(stream_new_answer(question, selected_document))

@@ -71,17 +71,20 @@ def get_config():
         return None, str(error)
 
 
-def ask_question(question: str, history=None):
+def ask_question(question: str, history=None, source=None):
     """Ask the pipeline. Data holds `answer`, `citations` and `status`.
 
-    `history` carries earlier turns so a follow-up can be understood.
+    `history` carries earlier turns so a follow-up can be understood. `source`
+    names one document to answer from, or None for the whole library.
     """
     return _request(
-        "post", "/ask", payload={"question": question, "history": history or []}
+        "post",
+        "/ask",
+        payload={"question": question, "history": history or [], "source": source},
     )
 
 
-def ask_question_streamed(question: str, history=None):
+def ask_question_streamed(question: str, history=None, source=None):
     """Ask the pipeline and yield events as the answer is written.
 
     Yields the backend's own events - `start`, `token`, `final` - plus an
@@ -91,7 +94,7 @@ def ask_question_streamed(question: str, history=None):
     try:
         response = requests.post(
             f"{API_URL}/ask/stream",
-            json={"question": question, "history": history or []},
+            json={"question": question, "history": history or [], "source": source},
             stream=True,
             timeout=TIMEOUT,
         )

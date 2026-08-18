@@ -8,3 +8,4 @@
 {"at": "2026-08-17T17:31:02", "question": "When is it done?", "status": "ok", "seconds": 1.37, "top_score": 0.705, "sources": ["POSH Policy_2025 Ver2.0.pdf"]}
 {"at": "2026-08-17T17:31:19", "question": "what is background verification", "status": "ok", "seconds": 2.488, "top_score": 0.727, "sources": ["HR Security Policy-V1.0.pdf"]}
 {"at": "2026-08-17T17:31:42", "question": "summarize this", "status": "ok", "seconds": 1.658, "top_score": 0.732, "sources": ["HR Security Policy-V1.0.pdf"]}
+{"at": "2026-08-18T13:29:27", "question": "tell me about travel policy", "status": "ok", "seconds": 3.067, "top_score": 0.825, "sources": ["Travel Policy_Ver1.0.pdf"]}

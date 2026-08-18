@@ -20,7 +20,7 @@ from typing import Dict, List
 import chromadb
 from chromadb.utils import embedding_functions
 
-from backend import lexical
+from backend import document_scope, lexical
 from backend.config import (
     CANDIDATE_K,
     CHROMA_DIR,
@@ -88,6 +88,7 @@ def invalidate() -> None:
     global _corpus_cache
     _corpus_cache = None
     lexical.reset()
+    document_scope.reset()
 
 def rebuild(chunks: List[Dict], batch_size: int = 100) -> int:
     """Wipe the collection and store the given chunks. Returns how many were stored.
@@ -159,7 +160,9 @@ def _cosine_distances(question: str, ids: List[str]) -> List[float]:
         distances.append(1.0 - dot / (query_norm * norm))
     return distances
 
-def lexical_candidates(question: str, limit: int = LEXICAL_K) -> List[Dict]:
+def lexical_candidates(
+    question: str, limit: int = LEXICAL_K, source: str = None
+) -> List[Dict]:
     """Chunks the keyword leg admits, best BM25 first.
 
     Empty unless the question names something specific enough to identify a
@@ -168,11 +171,11 @@ def lexical_candidates(question: str, limit: int = LEXICAL_K) -> List[Dict]:
     offers it no anchor, so the leg contributes nothing and the distance filters
     decide alone, exactly as before.
     """
-    ids, documents, metadatas = _corpus()
+    ids, documents, metadatas = document_scope.restrict(_corpus(), source)
     if not documents:
         return []
 
-    positions = lexical.get_index(documents).candidates(question, limit)
+    positions = document_scope.keyword_index(source, documents).candidates(question, limit)
     if not positions:
         return []
 
@@ -221,7 +224,7 @@ def _fuse(semantic: List[Dict], keyword: List[Dict], top_k: int) -> List[Dict]:
         chunk.pop("distance", None)
     return ranked
 
-def semantic_candidates(question: str, total: int) -> List[Dict]:
+def semantic_candidates(question: str, total: int, source: str = None) -> List[Dict]:
     """The meaning-based leg, gated exactly as it always was.
 
     Two stages, because one threshold cannot answer both questions that matter.
@@ -241,6 +244,10 @@ def semantic_candidates(question: str, total: int) -> List[Dict]:
     response = get_collection().query(
         query_texts=[question],
         n_results=min(CANDIDATE_K, total),
+        # One stored field decides the whole scope. `source` is the filename
+        # every chunk was saved with, so restricting to a document needs no
+        # second collection - Chroma never looks at the other documents' chunks.
+        where={"source": source} if source else None,
     )
     candidates = [
         (distance, text, metadata)
@@ -270,7 +277,10 @@ def semantic_candidates(question: str, total: int) -> List[Dict]:
     ]
 
 def search(
-    question: str, top_k: int = TOP_K, lexical_question: str = None
+    question: str,
+    top_k: int = TOP_K,
+    lexical_question: str = None,
+    source: str = None,
 ) -> List[Dict]:
     """Find the chunks that answer the question, by meaning and by keyword.
 
@@ -288,15 +298,21 @@ def search(
     text to embed. A follow-up is rewritten with the previous question attached
     so it can be embedded at all, but feeding that to BM25 would let the earlier
     question's keywords outvote the current one. See rag.retrieve.
+
+    `source` restricts the search to one document, and defaults to none, which
+    is the original library-wide behaviour. Both legs are restricted, and so is
+    the identifier guard below, so a question the chosen document cannot answer
+    comes back empty rather than being answered out of a different document.
     """
     total = get_collection().count()
     if total == 0:
         return []
 
     asked = lexical_question or question
-    semantic = semantic_candidates(question, total)
-    keyword = lexical_candidates(asked)
-    index = lexical.get_index(_corpus()[1])
+    semantic = semantic_candidates(question, total, source)
+    keyword = lexical_candidates(asked, source=source)
+    scoped = document_scope.restrict(_corpus(), source)
+    index = document_scope.keyword_index(source, scoped[1])
     if (
         semantic
         and lexical.mentions_value(asked)

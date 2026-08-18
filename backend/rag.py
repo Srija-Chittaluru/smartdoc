@@ -96,7 +96,11 @@ def search_text_for(question: str, history: Optional[List[Dict]]) -> str:
     previous = history[-1].get("question", "")
     return f"{previous} {question}".strip() if previous else question
 
-def retrieve(question: str, history: Optional[List[Dict]] = None) -> Dict:
+def retrieve(
+    question: str,
+    history: Optional[List[Dict]] = None,
+    source: Optional[str] = None,
+) -> Dict:
     """Find the supporting chunks. Never raises.
 
     Returns {"chunks": [...], "seconds": float, "error": str|None}. The distance
@@ -109,11 +113,14 @@ def retrieve(question: str, history: Optional[List[Dict]] = None) -> Dict:
     one, because a keyword match is literal and cannot tell which half of the
     string the user actually asked about. So the rewrite goes to the embedding
     and the raw question goes to the keyword leg.
+
+    `source` names the one document to search, or is None for all of them. It
+    is handed straight to vector_store.search; no filtering happens here.
     """
     started = time.perf_counter()
     try:
         chunks = vector_store.search(
-            search_text_for(question, history), lexical_question=question
+            search_text_for(question, history), lexical_question=question, source=source
         )
         return {"chunks": chunks, "seconds": round(time.perf_counter() - started, 3), "error": None}
     except Exception:
@@ -236,7 +243,7 @@ def _finish(answer: str, chunks: List[Dict], seconds: float) -> Dict:
 # --- The two public entry points ---------------------------------------------
 
 
-def _prepare(question: str, history) -> Dict:
+def _prepare(question: str, history, source: Optional[str] = None) -> Dict:
     """Run the guards and retrieval that both entry points share.
 
     Returns either {"reply": <finished reply>} to stop, or {"chunks", "seconds"}
@@ -253,7 +260,7 @@ def _prepare(question: str, history) -> Dict:
     if refusal:
         return {"reply": refusal}
 
-    found = retrieve(question, history)
+    found = retrieve(question, history, source)
     if found["error"]:
         return {"reply": _reply(found["error"], [], "api_error", retrieval_seconds=found["seconds"])}
 
@@ -276,16 +283,20 @@ def _prepare(question: str, history) -> Dict:
     return {"question": question, "chunks": found["chunks"], "seconds": found["seconds"]}
 
 
-def answer_question(question: str, history: Optional[List[Dict]] = None) -> Dict:
+def answer_question(
+    question: str,
+    history: Optional[List[Dict]] = None,
+    source: Optional[str] = None,
+) -> Dict:
     """Run the full pipeline and return an answer plus its citations.
 
     `status` tells the UI what happened: ok, empty_question, question_too_long,
     no_documents, no_match, missing_api_key, or api_error.
 
     `history` is optional and defaults to none, so existing callers are
-    unaffected.
+    unaffected. So is `source`, which restricts the answer to one document.
     """
-    prepared = _prepare(question, history)
+    prepared = _prepare(question, history, source)
     if "reply" in prepared:
         return prepared["reply"]
 
@@ -303,7 +314,9 @@ def answer_question(question: str, history: Optional[List[Dict]] = None) -> Dict
 
 
 def answer_stream(
-    question: str, history: Optional[List[Dict]] = None
+    question: str,
+    history: Optional[List[Dict]] = None,
+    source: Optional[str] = None,
 ) -> Generator[Dict, None, None]:
     """The same pipeline, yielding the answer as the model writes it.
 
@@ -314,7 +327,7 @@ def answer_stream(
 
     A caller that only wants the outcome can ignore everything but `final`.
     """
-    prepared = _prepare(question, history)
+    prepared = _prepare(question, history, source)
     if "reply" in prepared:
         # A refusal has no text to stream, so it arrives as one final event.
         yield {"type": "final", **prepared["reply"]}

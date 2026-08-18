@@ -46,6 +46,12 @@ class AskRequest(BaseModel):
         default_factory=list,
         description="Earlier turns, so a follow-up question can be understood.",
     )
+    # The filename of one indexed document, to answer from that document alone.
+    # None - the default - searches the whole library, exactly as before.
+    source: Optional[str] = Field(
+        default=None,
+        description="Restrict the answer to this document. None searches all of them.",
+    )
 
 
 class Citation(BaseModel):
@@ -122,7 +128,7 @@ def ask(request: AskRequest):
     Always returns HTTP 200 with a `status` field rather than raising, so the
     UI can show a helpful message instead of a stack trace.
     """
-    return rag.answer_question(request.question, _history_of(request))
+    return rag.answer_question(request.question, _history_of(request), request.source)
 
 
 def _history_of(request: AskRequest) -> list:
@@ -139,7 +145,9 @@ def ask_stream(request: AskRequest):
     """
 
     def events():
-        for event in rag.answer_stream(request.question, _history_of(request)):
+        for event in rag.answer_stream(
+            request.question, _history_of(request), request.source
+        ):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(
