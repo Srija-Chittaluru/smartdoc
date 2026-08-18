@@ -7,15 +7,24 @@ Run with:  uvicorn backend.main:app --reload
 """
 
 import json
-import time
 from typing import Optional
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from backend import library, metrics, rag, vector_store
-from backend.config import CHAT_MODEL, CHUNK_OVERLAP, CHUNK_SIZE, EMBEDDING_MODEL, TOP_K
+from backend import library, rag, vector_store
+from backend.config import (
+    CHAT_MODEL,
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    EMBEDDING_MODEL,
+    MAX_DISTANCE,
+    RARE_DF_RATIO,
+    RELATIVE_MARGIN,
+    STRONG_MATCH,
+    TOP_K,
+)
 
 app = FastAPI(
     title="SmartDoc API",
@@ -45,6 +54,11 @@ class Citation(BaseModel):
     section: str
     score: float
     text: str
+    # Which retriever found this chunk: "semantic" by meaning, "keyword" by a
+    # literal value in the question, "both" when the two agreed. `score` is a
+    # cosine similarity in every case - never a BM25 or fusion score. Defaulted
+    # so an older cached reply without the field still validates.
+    match: str = "semantic"
 
 
 class AskResponse(BaseModel):
@@ -90,6 +104,14 @@ def show_config():
         "embedding_model": EMBEDDING_MODEL,
         "chat_model": CHAT_MODEL,
         "vector_db": "ChromaDB (persisted to ./chroma_db)",
+        # Retrieval is hybrid: cosine distance and BM25, each gated on its own
+        # scale. Worth exposing because these are the numbers that decide when
+        # the answer is "I don't know", and they are corpus-dependent.
+        "retrieval": "hybrid (semantic + BM25, fused by RRF)",
+        "max_distance": MAX_DISTANCE,
+        "relative_margin": RELATIVE_MARGIN,
+        "strong_match": STRONG_MATCH,
+        "rare_df_ratio": RARE_DF_RATIO,
     }
 
 
@@ -99,14 +121,8 @@ def ask(request: AskRequest):
 
     Always returns HTTP 200 with a `status` field rather than raising, so the
     UI can show a helpful message instead of a stack trace.
-
-    The pipeline itself is untouched - the call is only timed, and the outcome
-    written to the query log so the Analytics page has data.
     """
-    started = time.perf_counter()
-    result = rag.answer_question(request.question, _history_of(request))
-    metrics.record(request.question, result, time.perf_counter() - started)
-    return result
+    return rag.answer_question(request.question, _history_of(request))
 
 
 def _history_of(request: AskRequest) -> list:
@@ -123,17 +139,8 @@ def ask_stream(request: AskRequest):
     """
 
     def events():
-        started = time.perf_counter()
-        final = None
-
         for event in rag.answer_stream(request.question, _history_of(request)):
-            if event["type"] == "final":
-                # Held back so the log records the finished answer, not a token.
-                final = {key: value for key, value in event.items() if key != "type"}
             yield f"data: {json.dumps(event)}\n\n"
-
-        if final is not None:
-            metrics.record(request.question, final, time.perf_counter() - started)
 
     return StreamingResponse(
         events(),
@@ -274,31 +281,3 @@ def clear_library():
         return _done()
     except Exception as error:
         return _failed(f"Could not clear the library: {error}")
-
-
-# --- Analytics ----------------------------------------------------------------
-
-
-@app.get("/analytics")
-def analytics():
-    """Usage figures for the dashboard: query stats plus index composition."""
-    rows = library.list_documents()
-    return {
-        "summary": metrics.summary(),
-        "totals": library.totals(),
-        "chunks_per_document": [
-            {"document": row["name"], "chunks": row["chunks"]}
-            for row in rows
-            if row["chunks"]
-        ],
-    }
-
-
-@app.delete("/analytics")
-def clear_analytics():
-    """Forget the recorded query history. The index is not touched."""
-    try:
-        metrics.clear()
-        return _done()
-    except Exception as error:
-        return _failed(f"Could not clear the query history: {error}")

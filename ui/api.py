@@ -151,11 +151,3 @@ def delete_document(name: str):
 def clear_library():
     """Remove every document. Confirm before calling this."""
     return _request("delete", "/documents", timeout=INDEXING_TIMEOUT)
-
-
-# --- Analytics ---------------------------------------------------------------
-
-
-def get_analytics():
-    """Dashboard figures: query stats, totals and index composition."""
-    return _request("get", "/analytics")

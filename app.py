@@ -27,7 +27,6 @@ apply_theme()
 pages = [
     st.Page("views/ask.py", title="Ask Documents", icon="💬", default=True),
     st.Page("views/library.py", title="Document Library", icon="📚"),
-    st.Page("views/analytics.py", title="Analytics", icon="📊"),
     st.Page("views/about.py", title="About", icon="ℹ️"),
 ]
 

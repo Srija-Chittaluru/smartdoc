@@ -69,6 +69,11 @@ def sidebar_status():
     )
 
 
+# Only worth saying when the keyword leg was involved. "semantic" is the normal
+# case and naming it on every citation would be noise.
+FOUND_BY = {"keyword": "exact match", "both": "exact + similar"}
+
+
 def confidence_label(score: float) -> str:
     """Turn a 0-1 similarity score into words, so it needs no explaining."""
     if score >= 0.80:
@@ -118,6 +123,12 @@ def render_citations(citations: list):
         label = f"[{number}]  {citation['source']}  ·  page {citation['page']}"
         if citation["section"]:
             label += f"  ·  {citation['section']}"
+        # How it was found, when it was not the usual way. The meter beside it is
+        # still a similarity - a keyword hit is scored by cosine distance like
+        # any other, so the two numbers remain comparable.
+        found_by = FOUND_BY.get(citation.get("match", "semantic"))
+        if found_by:
+            label += f"  ·  {found_by}"
 
         with st.expander(label):
             score = float(citation["score"])

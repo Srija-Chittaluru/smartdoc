@@ -9,102 +9,38 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load key=value pairs from .env into the environment.
 load_dotenv()
-
-# --- Folders -----------------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Drop your PDFs in here, then run `python ingest.py`.
 DOCUMENTS_DIR = PROJECT_ROOT / "documents"
 
-# ChromaDB writes its files here, so the index survives a restart.
 CHROMA_DIR = PROJECT_ROOT / "chroma_db"
 
 COLLECTION_NAME = "company_documents"
 
-
-# --- Chunking ----------------------------------------------------------------
-# Why 800 characters (~150-200 words)?
-#   - Small enough that one chunk is about one idea, so the embedding is
-#     specific rather than a blurry average of a whole page.
-#   - Big enough to keep a full policy sentence and its condition together.
-#     At 300 chars we kept splitting "employees get 18 days leave" away from
-#     "...after completing probation", which produced confidently wrong answers.
-#
-# Why 150 characters of overlap (~19%)?
-#   - A sentence that straddles a chunk boundary would otherwise be cut in half
-#     and belong to neither chunk. The overlap means it appears whole in one of
-#     them. 15-20% is the usual sweet spot: enough to protect boundaries,
-#     not so much that the database fills up with duplicate text.
-
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 150
 
-
-# --- Retrieval ---------------------------------------------------------------
-
-# How many chunks to send to the LLM as context.
-# 4 keeps the prompt focused; more chunks start adding noise that the model
-# then has to ignore.
 TOP_K = 4
-
-# How many chunks to pull out of Chroma before filtering down to TOP_K.
-# Searching wider than we return means a good chunk sitting at rank 6 still gets
-# a chance; asking for only 4 discarded it before any filter could see it.
 CANDIDATE_K = 12
-
-# Chroma returns a cosine distance: 0.0 = identical, 2.0 = opposite.
-# Anything above this is treated as "not really about the question" and is
-# dropped. This is what makes out-of-scope questions answer "I don't know"
-# instead of retrieving the 4 least-irrelevant chunks and inventing something.
-#
-# 0.75 was picked by measuring, not guessing. Across 10 questions the documents
-# do answer and 8 they do not, the distances separated cleanly:
-#
-#   in-scope:      0.276 - 0.615   (worst was the vague query "vacation days")
-#   out-of-scope:  0.781 - 0.977   (closest was "How do I train a puppy?",
-#                                   which brushes against "Mandatory Training")
-#
-# 0.75 sits in that gap. It leaves 0.135 of headroom for an in-scope question
-# phrased worse than any we tested, while still rejecting all 8 off-topic ones.
-# Re-measure this if you swap in a very different corpus - the gap moves.
 MAX_DISTANCE = 0.75
-
-# The second filter. MAX_DISTANCE asks "is this chunk about the subject at all?"
-# and cannot tell that a chunk at 0.73 is far worse than one at 0.28 - both are
-# under the bar. This asks the relative question instead: a chunk is kept only
-# if it is within this distance of the *best* chunk found for that question.
-# So the number of chunks returned varies with how many are genuinely good,
-# rather than being fixed at four.
-#
-# 0.30 was measured, like MAX_DISTANCE. Below 0.25 nearly every question
-# collapsed to a single chunk, which splits a policy from its condition
-# ("21 days leave" / "...after probation"). Above 0.35 the count jumped to the
-# TOP_K ceiling everywhere, so the filter stopped filtering.
 RELATIVE_MARGIN = 0.30
+STRONG_MATCH = 0.60
+BM25_K1 = 1.5
+BM25_B = 0.75
+LEXICAL_K = 8
+RARE_DF_RATIO = 0.10
+RRF_K = 60
+W_SEMANTIC = 1.0
+W_LEXICAL = 1.0
 
-
-# --- Models ------------------------------------------------------------------
-
-# Embeddings run locally via sentence-transformers: no API key, no cost,
-# works offline. 384 dimensions, fast on a laptop.
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
-
-# temperature=0 asks the model to be as deterministic as it can, so the same
-# question gives an equivalent answer every time.
 TEMPERATURE = 0
-
-# Guard against someone pasting an entire novel into the question box.
 MAX_QUESTION_LENGTH = 1000
-
-
-# --- Backend address ---------------------------------------------------------
-
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 API_URL = os.getenv("API_URL", f"http://{API_HOST}:{API_PORT}")

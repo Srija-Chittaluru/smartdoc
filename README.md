@@ -48,7 +48,9 @@ isn't tuned to a single document format.
 ```
 PDFs ──▶ chunk ──▶ embed ──▶ ChromaDB          (once, via ingest.py)
                                   │
-Question ──▶ embed ──▶ search ────┘──▶ top 4 chunks ──▶ GPT ──▶ answer + citations
+                    ┌── semantic ──┤  cosine distance, MAX_DISTANCE guard
+Question ──▶────────┤              ├──▶ fuse ──▶ top 4 ──▶ GPT ──▶ answer + citations
+                    └── keyword ───┘  BM25, rare-value guard
 ```
 
 **What happens when you press Enter**, step by step:
@@ -57,10 +59,14 @@ Question ──▶ embed ──▶ search ────┘──▶ top 4 chunks 
    anything costs money.
 2. **Embed the question** — the same local model that embedded the documents
    turns your question into 384 numbers representing its meaning.
-3. **Search** — ChromaDB finds the 4 closest chunks by cosine distance.
-4. **Filter** — chunks further than `MAX_DISTANCE` away are dropped. If nothing
-   survives, we stop here and answer *"I don't know"* — the language model is
-   never called, so it never gets the chance to improvise.
+3. **Search, twice** — ChromaDB finds the closest chunks by cosine distance, and
+   BM25 searches the same chunks by keyword. The two exist because they fail in
+   opposite directions: see *Why both kinds of search* below.
+4. **Filter** — each search is filtered on its own scale. Chunks further than
+   `MAX_DISTANCE` away are dropped; keyword hits need a rare, value-shaped term
+   from the question. If nothing survives either, we stop here and answer *"I
+   don't know"* — the language model is never called, so it never gets the
+   chance to improvise.
 5. **Prompt** — the surviving chunks are pasted into the prompt as numbered
    sources, with a system prompt that forbids outside knowledge.
 6. **Answer** — GPT writes 2–4 sentences with `[1]`, `[2]` markers, and the UI
@@ -100,13 +106,38 @@ Chunking is done **page by page**. This gives up overlap across a page boundary,
 but it buys an exact page number for every single chunk — and a citation without
 a page number isn't really verifiable.
 
-### Why ChromaDB and not keyword search?
+### Why both kinds of search?
 
-Keyword search matches **letters**. The handbook says *"annual leave"*; employees
-ask about *"vacation days"*. Those share no keywords, so keyword search returns
-nothing — while the embeddings put them right next to each other because they
-mean the same thing. There's a test for exactly this
+Because each is blind to what the other sees, and the gap is not small.
+
+Embeddings match **meaning**. The handbook says *"annual leave"*; employees ask
+about *"vacation days"*. Those share no keywords, so keyword search alone returns
+nothing — while the embeddings put them next to each other
 (`test_matches_meaning_not_just_keywords`).
+
+The same property makes embeddings blind to **symbols**. `04-02-2026` and
+`22-08-2026` do not differ in meaning, so every register row lands in one tight
+cluster. Measured on this corpus, the row holding the date asked about ranked
+**79th of 232** — no better than chance — while BM25 ranked it **first**. Across
+eight exact-value questions (dates in two formats, a document code, three
+people's names) the embedding alone found 3; the two together find 8. Run
+`python scripts/eval_retrieval.py` to reproduce that table.
+
+They are combined carefully, because their scores are not comparable:
+
+- **Each leg admits chunks on its own scale.** Cosine distance for meaning, a
+  rare value term for keywords. Nothing is admitted on a fused score — an RRF
+  number sits around 0.016 and has no relation to cosine distance, so gating on
+  it would throw away the separation `MAX_DISTANCE` was measured to capture.
+- **Fusion decides order only**, by Reciprocal Rank Fusion, so a chunk both legs
+  found rises above one that only appeared in either.
+- **The keyword leg needs an anchor**: a token containing a digit, or a
+  capitalised multi-word name, and rare enough to identify one record. An
+  ordinary question offers neither, so the keyword leg stays out of the way and
+  the distance filters decide alone.
+- **A citation's score is always a cosine similarity**, even for a keyword-only
+  hit, whose true distance is computed from its stored embedding. A BM25 or RRF
+  score is never displayed as if it were a similarity.
 
 ChromaDB specifically, over a plain Python list of vectors:
 
@@ -132,7 +163,7 @@ for sentence embeddings.
 
 ## How it avoids hallucinating
 
-Four independent layers, because a prompt alone is not enough:
+Five independent layers, because a prompt alone is not enough:
 
 1. **Distance threshold** — irrelevant chunks are dropped before the model sees
    them. `MAX_DISTANCE = 0.75` was chosen by measuring, not guessing. Across 10
@@ -147,11 +178,23 @@ Four independent layers, because a prompt alone is not enough:
    0.75 sits in that gap, with 0.135 of headroom for an in-scope question
    phrased worse than any tested. An earlier setting of 0.85 let the puppy
    question through; a test now pins that case.
+
+   Re-measured after the document set was replaced, the gap is wider still —
+   in-scope 0.220 – 0.560, out-of-scope 0.800 – 0.905 — so 0.75 still separates.
+   Re-run `python scripts/eval_retrieval.py` after swapping documents: this is
+   the one number that does not transfer between corpora.
 2. **Empty retrieval short-circuits** — if nothing survives the filter, the API
    is never called and the answer is a fixed *"I don't know"* string.
 3. **A strict system prompt** — outside knowledge forbidden, one exact refusal
    sentence specified.
-4. **A post-check** — if the model refuses anyway, we strip the citations, so an
+4. **Absent identifiers** — a question naming a code or date that appears in no
+   chunk is refused outright, whatever the distance says. This is the one case a
+   threshold cannot catch: `Calfus-ISMS-PL-99` does not exist, but it embeds
+   0.266 from the HR Security Policy — all but identical to the 0.267 the real
+   `Calfus-ISMS-PL-15` gets, because one digit is not a difference in meaning.
+   Answering from the policy that does exist would quietly attribute it the
+   wrong document number.
+5. **A post-check** — if the model refuses anyway, we strip the citations, so an
    *"I don't know"* is never dressed up with sources.
 
 ## Where it is most likely to be wrong
@@ -164,8 +207,12 @@ Being honest about the limits:
 - **Answers that need two distant documents.** We retrieve 4 chunks by
   similarity. A question needing a rule from page 1 of one PDF *and* page 9 of
   another may only get one of them.
-- **Tables and multi-column layouts.** Text extraction flattens a table into a
-  run of words, so column relationships can be lost.
+- **Bare first names.** A question about *"John's request"* is not refused when
+  the documents contain no John, because one capitalised word cannot be told
+  apart from a synonym — and *"Grievance"* is equally absent from the vocabulary
+  while the POSH policy answers it perfectly. Full names (*"John Smith"*) and
+  codes are refused correctly; a lone first name reaches the distance guard
+  alone. See `lexical.mentions_value`.
 - **The section label is a heuristic.** `looks_like_heading()` recognises
   numbered, ALL CAPS and Title Case lines. An unusual heading style may be
   missed — the document and page number are still correct.
@@ -229,7 +276,8 @@ smartdoc/
 ├── backend/
 │   ├── config.py               all settings and tunables, one place
 │   ├── chunker.py              PDF → clean, citable chunks
-│   ├── vector_store.py         embeddings + ChromaDB
+│   ├── vector_store.py         embeddings + ChromaDB + hybrid fusion
+│   ├── lexical.py              BM25 keyword search (no dependencies)
 │   ├── rag.py                  query → retrieve → answer
 │   └── main.py                 FastAPI endpoints
 ├── tests/test_pipeline.py      21 tests, no API key needed

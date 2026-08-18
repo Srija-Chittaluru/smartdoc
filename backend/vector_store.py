@@ -13,49 +13,81 @@ Why ChromaDB and not a Python list of vectors?
     comparing the query against every chunk one at a time.
 """
 
+import math
 import shutil
 from typing import Dict, List
 
 import chromadb
 from chromadb.utils import embedding_functions
 
+from backend import lexical
 from backend.config import (
     CANDIDATE_K,
     CHROMA_DIR,
     COLLECTION_NAME,
     EMBEDDING_MODEL,
+    LEXICAL_K,
     MAX_DISTANCE,
     RELATIVE_MARGIN,
+    RRF_K,
+    STRONG_MATCH,
     TOP_K,
+    W_LEXICAL,
+    W_SEMANTIC,
 )
-
-# Loading the embedding model takes a few seconds, so we do it once and reuse it.
 _collection = None
-
+_embedder = None
 
 def get_collection():
     """Open (or create) the on-disk Chroma collection."""
-    global _collection
+    global _collection, _embedder
     if _collection is not None:
         return _collection
 
-    # PersistentClient = saved to disk. The alternative, chromadb.Client(),
-    # would be in-memory only and lost on every restart.
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 
     embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name=EMBEDDING_MODEL
     )
-
+    _embedder = embedder
     _collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
         embedding_function=embedder,
-        # Cosine similarity compares direction, not length, which is the right
-        # measure for sentence embeddings. Chroma defaults to squared L2.
         metadata={"hnsw:space": "cosine"},
     )
     return _collection
 
+def chunk_metadata(chunk: Dict, **extra) -> Dict:
+    """Flatten one chunk into the metadata Chroma stores beside it.
+
+    A table row's cells are stored as their own fields, prefixed so a column
+    called "Source" or "Page" cannot overwrite the citation fields. Chroma only
+    accepts flat scalars here, which is why the cells are flattened rather than
+    nested.
+
+    Shared with library.index_document so a PDF added through the UI carries the
+    same fields as one added by ingest.py.
+    """
+    meta = {
+        "source": chunk["source"],
+        "page": chunk["page"],
+        "section": chunk["section"],
+    }
+    for key, value in chunk.get("fields", {}).items():
+        meta[f"col_{key}"] = value
+    meta.update(extra)
+    return meta
+
+def invalidate() -> None:
+    """Forget what was derived from the collection, after it has been changed.
+
+    The keyword index and the corpus snapshot are both built from Chroma's
+    contents. Anything that adds or removes chunks has to call this, or a search
+    would score the question against documents that are no longer there.
+    """
+    global _corpus_cache
+    _corpus_cache = None
+    lexical.reset()
 
 def rebuild(chunks: List[Dict], batch_size: int = 100) -> int:
     """Wipe the collection and store the given chunks. Returns how many were stored.
@@ -63,37 +95,134 @@ def rebuild(chunks: List[Dict], batch_size: int = 100) -> int:
     We rebuild from scratch rather than appending so that re-running ingest
     after editing a PDF does not leave stale duplicates behind.
     """
-    global _collection
+    global _collection, _corpus_cache
 
-    # Delete the whole index directory rather than calling delete_collection().
-    # Chroma leaves its on-disk index segments behind when a collection is
-    # dropped, so repeated re-ingests would slowly fill the folder with orphans.
-    # This is also simpler: there is no chance of stale chunks surviving.
     if CHROMA_DIR.exists():
         shutil.rmtree(CHROMA_DIR)
     _collection = None
+    invalidate()
 
     collection = get_collection()
 
-    # Chroma embeds in batches; small batches keep memory flat and let us
-    # print progress on a big document set.
     for start in range(0, len(chunks), batch_size):
         batch = chunks[start : start + batch_size]
         collection.add(
             ids=[f"chunk-{start + i}" for i in range(len(batch))],
             documents=[c["text"] for c in batch],
-            metadatas=[
-                {"source": c["source"], "page": c["page"], "section": c["section"]}
-                for c in batch
-            ],
+            metadatas=[chunk_metadata(c) for c in batch],
         )
         print(f"  -  embedded {min(start + batch_size, len(chunks))}/{len(chunks)}")
 
     return collection.count()
 
+_corpus_cache = None
 
-def search(question: str, top_k: int = TOP_K) -> List[Dict]:
-    """Find the chunks most similar in meaning to the question.
+def _corpus():
+    """Every stored chunk as (ids, documents, metadatas), in one fixed order.
+
+    The count check is a backstop: callers are expected to call invalidate()
+    after changing the collection, and this catches the case where one forgets.
+    """
+    global _corpus_cache
+    if _corpus_cache is None or len(_corpus_cache[1]) != get_collection().count():
+        stored = get_collection().get(include=["documents", "metadatas"])
+        _corpus_cache = (stored["ids"], stored["documents"], stored["metadatas"])
+        lexical.reset()
+    return _corpus_cache
+
+def _cosine_distances(question: str, ids: List[str]) -> List[float]:
+    """The true cosine distance from the question to each of these chunks.
+
+    A keyword-only hit never came back from the vector query, so it carries no
+    distance - and the meter beside a citation in the UI is a similarity meter.
+    Rather than invent a number, or show a BM25 score where a similarity
+    belongs, the real distance is computed from the embeddings Chroma already
+    stored. Only the handful of keyword hits are fetched.
+
+    Chroma's "cosine" space is 1 - cosine similarity, and this matches it.
+    """
+    if not ids:
+        return []
+
+    get_collection()  # populates _embedder
+    query = list(_embedder([question])[0])
+    query_norm = math.sqrt(sum(v * v for v in query)) or 1.0
+
+    stored = get_collection().get(ids=ids, include=["embeddings"])
+    vectors = dict(zip(stored["ids"], stored["embeddings"]))
+
+    distances = []
+    for chunk_id in ids:
+        vector = vectors[chunk_id]
+        dot = sum(a * b for a, b in zip(query, vector))
+        norm = math.sqrt(sum(v * v for v in vector)) or 1.0
+        distances.append(1.0 - dot / (query_norm * norm))
+    return distances
+
+def lexical_candidates(question: str, limit: int = LEXICAL_K) -> List[Dict]:
+    """Chunks the keyword leg admits, best BM25 first.
+
+    Empty unless the question names something specific enough to identify a
+    record - see lexical.LexicalIndex.value_terms. That restriction is what
+    keeps this leg from weakening the out-of-scope guard: an ordinary question
+    offers it no anchor, so the leg contributes nothing and the distance filters
+    decide alone, exactly as before.
+    """
+    ids, documents, metadatas = _corpus()
+    if not documents:
+        return []
+
+    positions = lexical.get_index(documents).candidates(question, limit)
+    if not positions:
+        return []
+
+    chosen = [ids[position] for position in positions]
+    distances = _cosine_distances(question, chosen)
+
+    return [
+        {
+            "text": documents[position],
+            "source": metadatas[position]["source"],
+            "page": metadatas[position]["page"],
+            "section": metadatas[position].get("section", ""),
+            "score": round(max(0.0, 1 - distances[order] / 2), 3),
+            "match": "keyword",
+        }
+        for order, position in enumerate(positions)
+    ]
+
+
+def _fuse(semantic: List[Dict], keyword: List[Dict], top_k: int) -> List[Dict]:
+    """Order the admitted chunks by Reciprocal Rank Fusion.
+
+    Ordering only. Admission was already decided by each leg on its own scale,
+    which is what keeps MAX_DISTANCE meaningful - an RRF score is a number
+    around 0.016 with no relation to cosine distance, and gating on it would
+    throw away the separation those thresholds were measured to capture.
+
+    A chunk both legs found collects a term from each and rises above one that
+    only appeared in either. Its "match" becomes "both", so the UI can say why.
+    """
+    fused: Dict[str, Dict] = {}
+
+    for weight, results in ((W_SEMANTIC, semantic), (W_LEXICAL, keyword)):
+        for rank, chunk in enumerate(results, start=1):
+            entry = fused.get(chunk["text"])
+            if entry is None:
+                entry = dict(chunk)
+                entry["_rrf"] = 0.0
+                fused[chunk["text"]] = entry
+            elif entry["match"] != chunk["match"]:
+                entry["match"] = "both"
+            entry["_rrf"] += weight / (RRF_K + rank)
+    ranked = sorted(fused.values(), key=lambda c: (-c["_rrf"], -c["score"]))[:top_k]
+    for chunk in ranked:
+        chunk.pop("_rrf", None)
+        chunk.pop("distance", None)
+    return ranked
+
+def semantic_candidates(question: str, total: int) -> List[Dict]:
+    """The meaning-based leg, gated exactly as it always was.
 
     Two stages, because one threshold cannot answer both questions that matter.
 
@@ -109,20 +238,10 @@ def search(question: str, top_k: int = TOP_K) -> List[Dict]:
     within RELATIVE_MARGIN of the best one, so how many come back depends on
     how many are genuinely good rather than being fixed at four.
     """
-    collection = get_collection()
-    total = collection.count()
-    if total == 0:
-        return []
-
-    # Search wider than we intend to return. Narrowing happens below, and a
-    # chunk cannot be considered by a filter that never received it.
-    response = collection.query(
+    response = get_collection().query(
         query_texts=[question],
         n_results=min(CANDIDATE_K, total),
     )
-
-    # Stage 1. Chroma returns these already sorted nearest-first, and the two
-    # stages below both rely on that order.
     candidates = [
         (distance, text, metadata)
         for text, metadata, distance in zip(
@@ -134,10 +253,6 @@ def search(question: str, top_k: int = TOP_K) -> List[Dict]:
     ]
     if not candidates:
         return []
-
-    # Stage 2, measured from the closest chunk this particular question found.
-    # A fixed number here would defeat the point: the margin has to be judged
-    # against the best available answer, not against the corpus as a whole.
     best = candidates[0][0]
     kept = [c for c in candidates if c[0] <= best + RELATIVE_MARGIN]
 
@@ -147,16 +262,50 @@ def search(question: str, top_k: int = TOP_K) -> List[Dict]:
             "source": metadata["source"],
             "page": metadata["page"],
             "section": metadata.get("section", ""),
-            # Turn distance into a 0-1 "how relevant is this" score that is
-            # easier to read in the UI than a raw cosine distance.
             "score": round(max(0.0, 1 - distance / 2), 3),
+            "match": "semantic",
+            "distance": distance,
         }
-        # top_k stays as a ceiling: the relative filter decides the usual case,
-        # but a question matching a dozen near-identical chunks must still not
-        # flood the prompt.
-        for distance, text, metadata in kept[:top_k]
+        for distance, text, metadata in kept
     ]
 
+def search(
+    question: str, top_k: int = TOP_K, lexical_question: str = None
+) -> List[Dict]:
+    """Find the chunks that answer the question, by meaning and by keyword.
+
+    Two retrievers, because they fail in opposite directions. The embedding
+    finds "annual leave" for "vacation days" and cannot separate "04-02-2026"
+    from "22-08-2026"; BM25 does the reverse.
+
+    Each leg admits chunks on its own scale - MAX_DISTANCE and RELATIVE_MARGIN
+    for meaning, a rare value term for keywords. Nothing is admitted on a fused
+    score: an RRF number sits around 0.016 and has no relation to cosine
+    distance, so gating on it would discard the separation those thresholds were
+    measured to capture. Fusion decides order only.
+
+    `lexical_question` is the text to match literally, when it differs from the
+    text to embed. A follow-up is rewritten with the previous question attached
+    so it can be embedded at all, but feeding that to BM25 would let the earlier
+    question's keywords outvote the current one. See rag.retrieve.
+    """
+    total = get_collection().count()
+    if total == 0:
+        return []
+
+    asked = lexical_question or question
+    semantic = semantic_candidates(question, total)
+    keyword = lexical_candidates(asked)
+    index = lexical.get_index(_corpus()[1])
+    if (
+        semantic
+        and lexical.mentions_value(asked)
+        and semantic[0]["distance"] > STRONG_MATCH
+    ):
+        semantic = []
+    if index.absent_identifiers(asked):
+        semantic = []
+    return _fuse(semantic, keyword, top_k)
 
 def stats() -> Dict:
     """Summary of what is currently indexed, for the UI sidebar."""

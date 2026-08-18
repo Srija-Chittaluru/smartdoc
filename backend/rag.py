@@ -20,11 +20,9 @@ from typing import Dict, Generator, List, Optional
 
 from openai import OpenAI, APIError, APIConnectionError, AuthenticationError, RateLimitError
 
-from backend import answer_cache, vector_store
+from backend import vector_store
 from backend.config import CHAT_MODEL, MAX_QUESTION_LENGTH, OPENAI_API_KEY, TEMPERATURE
 
-# The exact sentence the model must use when the documents do not answer the
-# question. Having one fixed phrase makes it easy to detect and to test.
 NO_ANSWER = "I don't know based on the provided documents."
 
 SYSTEM_PROMPT = f"""You are a company document assistant. You answer questions using ONLY the numbered sources given to you.
@@ -37,12 +35,7 @@ Rules:
 5. Be concise and plain-spoken. Two to four sentences is usually enough.
 6. Answer in the language the question was asked in."""
 
-# How many earlier turns to carry, so a follow-up can be understood without the
-# prompt growing without limit.
 HISTORY_TURNS = 3
-
-# A short question leaning on one of these is asking about the previous answer
-# rather than starting a new topic.
 REFERENTIAL_WORDS = {
     "it", "its", "that", "this", "they", "them", "their", "those", "these",
     "he", "she", "his", "her", "there", "one", "ones", "same",
@@ -52,18 +45,12 @@ REFERENTIAL_OPENERS = (
     "why", "who else", "when", "can i", "does it", "do they", "is it",
 )
 
-
 def _client() -> OpenAI:
     return OpenAI(api_key=OPENAI_API_KEY)
-
 
 def _reply(answer: str, citations: List[Dict], status: str, **extra) -> Dict:
     """The shape every caller gets back. `extra` adds timings without changing it."""
     return {"answer": answer, "citations": citations, "status": status, **extra}
-
-
-# --- Step 1: guard the input -------------------------------------------------
-
 
 def validate_question(question: str) -> Optional[Dict]:
     """Return a refusal if the question cannot be asked, else None.
@@ -81,10 +68,6 @@ def validate_question(question: str) -> Optional[Dict]:
             "question_too_long",
         )
     return None
-
-
-# --- Step 2: retrieve --------------------------------------------------------
-
 
 def is_follow_up(question: str) -> bool:
     """Decide whether a question only makes sense given the one before it.
@@ -105,7 +88,6 @@ def is_follow_up(question: str) -> bool:
         return True
     return any(word in REFERENTIAL_WORDS for word in words)
 
-
 def search_text_for(question: str, history: Optional[List[Dict]]) -> str:
     """What to actually embed: the question, or the question plus its context."""
     if not history or not is_follow_up(question):
@@ -114,16 +96,25 @@ def search_text_for(question: str, history: Optional[List[Dict]]) -> str:
     previous = history[-1].get("question", "")
     return f"{previous} {question}".strip() if previous else question
 
-
 def retrieve(question: str, history: Optional[List[Dict]] = None) -> Dict:
     """Find the supporting chunks. Never raises.
 
     Returns {"chunks": [...], "seconds": float, "error": str|None}. The distance
     filter lives in vector_store.search and is not changed here.
+
+    The two retrievers get different text on purpose. A follow-up is rewritten
+    with the previous question in front of it so there is something to embed at
+    all - "What about part-timers?" has no subject on its own. Handing that same
+    text to BM25 would let the earlier question's keywords outscore the current
+    one, because a keyword match is literal and cannot tell which half of the
+    string the user actually asked about. So the rewrite goes to the embedding
+    and the raw question goes to the keyword leg.
     """
     started = time.perf_counter()
     try:
-        chunks = vector_store.search(search_text_for(question, history))
+        chunks = vector_store.search(
+            search_text_for(question, history), lexical_question=question
+        )
         return {"chunks": chunks, "seconds": round(time.perf_counter() - started, 3), "error": None}
     except Exception:
         return {
@@ -132,7 +123,6 @@ def retrieve(question: str, history: Optional[List[Dict]] = None) -> Dict:
             # Friendly on purpose: this reaches the screen.
             "error": "The document index could not be searched. It may need rebuilding.",
         }
-
 
 def no_context_reply(seconds: float) -> Dict:
     """What to say when nothing was retrieved.
@@ -246,33 +236,22 @@ def _finish(answer: str, chunks: List[Dict], seconds: float) -> Dict:
 # --- The two public entry points ---------------------------------------------
 
 
-def _indexed_chunks() -> int:
-    """How many chunks are indexed. Part of the cache key, so an index rebuilt
-    behind the server's back cannot match an old answer."""
-    try:
-        return vector_store.get_collection().count()
-    except Exception:
-        return -1
-
-
 def _prepare(question: str, history) -> Dict:
     """Run the guards and retrieval that both entry points share.
 
     Returns either {"reply": <finished reply>} to stop, or {"chunks", "seconds"}
     to carry on to the model.
+
+    Nothing is remembered between questions. Every question is retrieved against
+    the index as it stands right now, which is what an HR document set needs -
+    a policy edited this morning must not be answered from this morning's
+    earlier answer.
     """
     question = (question or "").strip()
 
     refusal = validate_question(question)
     if refusal:
         return {"reply": refusal}
-
-    # Checked before retrieval, because a hit skips the whole rest of the
-    # pipeline - the search, the prompt and the OpenAI call.
-    chunk_count = _indexed_chunks()
-    cached = answer_cache.get(question, history, chunk_count)
-    if cached:
-        return {"reply": {**cached, "cached": True}}
 
     found = retrieve(question, history)
     if found["error"]:
@@ -320,9 +299,7 @@ def answer_question(question: str, history: Optional[List[Dict]] = None) -> Dict
     except Exception as error:
         return _llm_failure(error)
 
-    reply = _finish(answer, prepared["chunks"], prepared["seconds"])
-    answer_cache.put(question.strip(), history, _indexed_chunks(), reply)
-    return reply
+    return _finish(answer, prepared["chunks"], prepared["seconds"])
 
 
 def answer_stream(
@@ -339,18 +316,8 @@ def answer_stream(
     """
     prepared = _prepare(question, history)
     if "reply" in prepared:
-        reply = prepared["reply"]
-        # A cached answer still arrives as start/token/final, so the page
-        # renders it the same way as a freshly written one - it just appears
-        # all at once, because there is nothing to wait for.
-        if reply.get("cached"):
-            yield {
-                "type": "start",
-                "citations": reply.get("citations", []),
-                "retrieval_seconds": reply.get("retrieval_seconds", 0.0),
-            }
-            yield {"type": "token", "text": reply["answer"]}
-        yield {"type": "final", **reply}
+        # A refusal has no text to stream, so it arrives as one final event.
+        yield {"type": "final", **prepared["reply"]}
         return
 
     chunks, seconds = prepared["chunks"], prepared["seconds"]
@@ -373,6 +340,4 @@ def answer_stream(
         yield {"type": "final", **_llm_failure(error)}
         return
 
-    reply = _finish("".join(pieces), chunks, seconds)
-    answer_cache.put(question.strip(), history, _indexed_chunks(), reply)
-    yield {"type": "final", **reply}
+    yield {"type": "final", **_finish("".join(pieces), chunks, seconds)}

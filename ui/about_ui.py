@@ -22,7 +22,6 @@ CAPABILITIES = [
     ("🔍", "AI-Powered Semantic Search", "Finds answers by meaning, so “vacation days” matches “annual leave”."),
     ("📑", "View Source Citations", "Every answer names the document, page and section behind it."),
     ("📚", "Manage Document Library", "Review, re-index or remove documents whenever you need to."),
-    ("📊", "View Analytics", "See what people ask most and how well answers are matching."),
 ]
 
 BENEFITS = [

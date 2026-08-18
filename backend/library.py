@@ -15,10 +15,9 @@ from typing import Dict, List, Optional
 
 from pypdf import PdfReader
 
-from backend import answer_cache
 from backend.chunker import chunk_pdf
 from backend.config import DOCUMENTS_DIR
-from backend.vector_store import get_collection
+from backend.vector_store import chunk_metadata, get_collection, invalidate
 
 # Every way an upload can fail, and what to tell the person who uploaded it.
 # Kept in one place so the API and the interface cannot describe the same
@@ -143,9 +142,8 @@ def save_upload(data: bytes, filename: str) -> Path:
 def remove_from_index(name: str) -> None:
     """Delete every chunk belonging to one document."""
     get_collection().delete(where={"source": safe_name(name)})
-    # Remembered answers were drawn from documents that have just changed, so
-    # none of them can be trusted any more.
-    answer_cache.clear()
+    # The keyword index was built from the chunks that have just gone.
+    invalidate()
 
 
 def index_document(name: str) -> int:
@@ -165,17 +163,11 @@ def index_document(name: str) -> int:
     get_collection().add(
         ids=[f"{name}::{i}" for i in range(len(chunks))],
         documents=[c["text"] for c in chunks],
-        metadatas=[
-            {
-                "source": c["source"],
-                "page": c["page"],
-                "section": c["section"],
-                "indexed_at": indexed_at,
-            }
-            for c in chunks
-        ],
+        # Shared with ingest so a PDF added here carries the same table-cell
+        # fields as one added by ingest.py.
+        metadatas=[chunk_metadata(c, indexed_at=indexed_at) for c in chunks],
     )
-    answer_cache.clear()
+    invalidate()
     return len(chunks)
 
 
@@ -199,7 +191,7 @@ def clear_library() -> None:
     if ids:
         collection.delete(ids=ids)
 
-    answer_cache.clear()
+    invalidate()
     _page_cache.clear()
 
 
