@@ -36,13 +36,22 @@ STOPWORDS = frozenset(
 )
 TOKEN = re.compile(r"[a-z0-9][a-z0-9\-/.]*")
 PROPER_PHRASE = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b")
+# A PDF table's line breaks survive the Markdown conversion as "<br>", which
+# splits a name down the middle: "Arshi<br>Dutta".
+LINE_BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
 def tokenize(text: str) -> List[str]:
-    """Lowercase words, minus the stopwords, with values left intact."""
-    return [
-        token
-        for token in TOKEN.findall(text.lower())
-        if token not in STOPWORDS and not token.isspace()
-    ]
+    """Lowercase words, minus the stopwords, with values left intact.
+
+    A slash is part of a token so that "04/02/2026" survives whole, but a
+    Markdown table also crams cells together as "Singh/Arshi" - one token the
+    corpus holds and no question would ever type. Between words the slash is
+    therefore a separator; between digits it stays.
+    """
+    tokens: List[str] = []
+    for token in TOKEN.findall(text.lower()):
+        parts = [token] if any(c.isdigit() for c in token) else token.split("/")
+        tokens.extend(part for part in parts if part and part not in STOPWORDS)
+    return tokens
 
 def looks_like_value(token: str) -> bool:
     """Is this token an identifier rather than a word?
@@ -144,7 +153,11 @@ class LexicalIndex:
     """
     def __init__(self, documents: Sequence[str]):
         self.documents = list(documents)
-        self.lowered = [text.lower() for text in self.documents]
+        # The literal checks - phrase counting and name detection - read the text
+        # with a table's line breaks as spaces, so a name written across two
+        # lines of one cell is still the one phrase the question asks for.
+        readable = [LINE_BREAK.sub(" ", text) for text in self.documents]
+        self.lowered = [text.lower() for text in readable]
         self.tokens = [tokenize(text) for text in self.documents]
         self.total = len(self.documents)
         self.lengths = [len(t) for t in self.tokens]
@@ -166,7 +179,7 @@ class LexicalIndex:
         # adjacent word pairs. This is what lets a question find a name it did
         # not capitalise; see named_phrases.
         self.name_pairs: Set[str] = set()
-        for text in self.documents:
+        for text in readable:
             for phrase in PROPER_PHRASE.findall(text):
                 self.name_pairs.update(word_pairs(phrase.lower().split()))
 

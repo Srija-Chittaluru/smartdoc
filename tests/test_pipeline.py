@@ -464,3 +464,50 @@ def test_a_summary_request_retrieves_the_document_not_a_search():
     found = rag.retrieve("summarise this document", source=source)
     assert found["chunks"], "a summary must not come back empty-handed"
     assert all(chunk["match"] == "overview" for chunk in found["chunks"])
+
+
+# --- Names, however the question capitalises them ----------------------------
+# A question typed into a chat box is usually all lowercase, and a person's name
+# is the one thing the embedding cannot pin down.
+
+def a_stored_name():
+    """A name the corpus itself writes capitalised, and holds in few chunks."""
+    index = lexical.get_index(vector_store._corpus()[1])
+    for phrase in sorted(index.name_pairs):
+        if 0 < index.phrase_count(phrase) <= index.rare_ceiling:
+            return phrase
+    pytest.skip("no rare proper name is indexed")
+
+
+def test_a_name_anchors_the_keyword_leg_in_any_case():
+    name = a_stored_name()
+    index = lexical.get_index(vector_store._corpus()[1])
+
+    assert index.value_terms(f"who is {name}") == [name]
+    assert index.value_terms(f"who is {name.title()}?") == [name]
+
+
+def test_a_lowercase_name_reaches_the_chunk_that_holds_it():
+    name = a_stored_name()
+    hits = vector_store.search(f"who is {name}")
+
+    assert hits, "expected a match - did you run `python ingest.py`?"
+    assert any(name in hit["text"].lower() for hit in hits)
+    assert any(hit["match"] in ("keyword", "both") for hit in hits)
+
+
+def test_an_ordinary_pair_of_words_is_not_a_name():
+    """Only pairs the documents write as a proper name qualify, so an everyday
+    phrase cannot admit chunks this way."""
+    index = lexical.get_index(vector_store._corpus()[1])
+    for question in ["how do I train a puppy?", "what are the travel entitlements?"]:
+        assert index.named_phrases(question) == []
+
+
+def test_a_name_split_across_two_lines_of_a_table_is_still_one_name():
+    """PDF tables arrive with "<br>" where the cell wrapped, which used to cut a
+    name in half and leave nothing for the question to match."""
+    index = lexical.LexicalIndex(["|Prepared by|Arshi<br>Dutta/Anisha Singh|"])
+    assert index.phrase_count("arshi dutta") == 1
+    assert index.value_terms("who is arshi dutta") == ["arshi dutta"]
+    assert index.candidates("who is arshi dutta", 4) == [0]
