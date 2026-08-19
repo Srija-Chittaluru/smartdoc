@@ -35,6 +35,29 @@ Rules:
 5. Be concise and plain-spoken. Two to four sentences is usually enough.
 6. Answer in the language the question was asked in."""
 
+SUMMARY_PROMPT = """You are a company document assistant. You are given numbered excerpts sampled across one document, and asked to summarise it.
+
+Rules:
+1. Use only what the excerpts say. Never use outside knowledge, and never guess.
+2. The excerpts are a sample of the whole document, so they are enough to summarise it. Never reply that you do not know.
+3. Start with one sentence saying what the document is, then give the main points as a short bullet list.
+4. Cite the source number in square brackets after each point, like [1] or [2].
+5. If the excerpts clearly skip part of the document, say so in one line at the end.
+6. Answer in the language the question was asked in."""
+
+# Asking for a summary is not asking a question: there is no subject to search
+# for, so these go to the whole document instead of to the retrievers.
+SUMMARY_WORDS = (
+    "summarise", "summarize", "summary", "overview", "key points",
+    "main points", "key takeaways", "tl;dr", "gist", "outline",
+    "what is this document about", "what does this document say",
+)
+
+SUMMARY_NEEDS_DOCUMENT = (
+    "A summary is written from one whole document, so please choose which one in "
+    "the Document picker above and ask again."
+)
+
 HISTORY_TURNS = 3
 REFERENTIAL_WORDS = {
     "it", "its", "that", "this", "they", "them", "their", "those", "these",
@@ -88,6 +111,19 @@ def is_follow_up(question: str) -> bool:
         return True
     return any(word in REFERENTIAL_WORDS for word in words)
 
+def is_summary_request(question: str) -> bool:
+    """Decide whether the question asks for a document, not for a fact in one.
+
+    Kept short on purpose: a long question that happens to contain "summarise"
+    is asking about a topic ("summarise the notice period rules and the payroll
+    cut-off dates"), and searching for that topic is the better answer.
+    """
+    lowered = question.lower()
+    if len(lowered.split()) > 12:
+        return False
+    return any(word in lowered for word in SUMMARY_WORDS)
+
+
 def search_text_for(question: str, history: Optional[List[Dict]]) -> str:
     """What to actually embed: the question, or the question plus its context."""
     if not history or not is_follow_up(question):
@@ -119,9 +155,14 @@ def retrieve(
     """
     started = time.perf_counter()
     try:
-        chunks = vector_store.search(
-            search_text_for(question, history), lexical_question=question, source=source
-        )
+        if source and is_summary_request(question):
+            chunks = vector_store.document_overview(source)
+        else:
+            chunks = vector_store.search(
+                search_text_for(question, history),
+                lexical_question=question,
+                source=source,
+            )
         return {"chunks": chunks, "seconds": round(time.perf_counter() - started, 3), "error": None}
     except Exception:
         return {
@@ -199,7 +240,10 @@ def build_messages(question: str, chunks: List[Dict], history=None) -> List[Dict
         f"Question: {question}"
     )
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "system",
+            "content": SUMMARY_PROMPT if is_summary_request(question) else SYSTEM_PROMPT,
+        },
         {"role": "user", "content": user_prompt},
     ]
 
@@ -259,6 +303,9 @@ def _prepare(question: str, history, source: Optional[str] = None) -> Dict:
     refusal = validate_question(question)
     if refusal:
         return {"reply": refusal}
+
+    if is_summary_request(question) and not source:
+        return {"reply": _reply(SUMMARY_NEEDS_DOCUMENT, [], "pick_document")}
 
     found = retrieve(question, history, source)
     if found["error"]:

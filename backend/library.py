@@ -203,6 +203,42 @@ def _describe_status(indexed: bool, on_disk: bool) -> str:
     return "File missing"
 
 
+def _why_not_indexed(path: Path) -> str:
+    """Say what is stopping this PDF from being indexed.
+
+    Only called for the handful of rows that are not indexed, so it can afford
+    to open the file. The same problems are described in UPLOAD_PROBLEMS, and the
+    wording is reused rather than rewritten.
+    """
+    try:
+        reader = PdfReader(str(path))
+        if reader.is_encrypted:
+            return UPLOAD_PROBLEMS["encrypted"]
+        if len(reader.pages) == 0:
+            return UPLOAD_PROBLEMS["empty_pdf"]
+        # A few pages are enough to tell a text PDF from a scan, and keeps this
+        # quick on long documents.
+        if not any((page.extract_text() or "").strip() for page in reader.pages[:3]):
+            return UPLOAD_PROBLEMS["scanned"]
+    except Exception:
+        return UPLOAD_PROBLEMS["corrupted"]
+
+    return (
+        "The file is readable, it just has no chunks in the index yet — "
+        "it was added to the documents folder rather than uploaded here. "
+        "Use the recycle button to index it."
+    )
+
+
+def _status_reason(status: str, path: Optional[Path]) -> str:
+    """The hover explanation behind a status tag."""
+    if status == "Indexed":
+        return "Chunked and stored in the index, so questions can be answered from it."
+    if status == "File missing":
+        return "Its chunks are still in the index, but the PDF is no longer on disk."
+    return _why_not_indexed(path)
+
+
 def list_documents() -> List[Dict]:
     """One row per document, for the library table.
 
@@ -228,13 +264,15 @@ def list_documents() -> List[Dict]:
     for name in sorted(set(from_index) | set(on_disk), key=str.lower):
         indexed = from_index.get(name)
         path = on_disk.get(name)
+        status = _describe_status(bool(indexed), bool(path))
         rows.append(
             {
                 "name": name,
                 "pages": page_count(path) if path else (indexed or {}).get("pages", 0),
                 "chunks": indexed["chunks"] if indexed else 0,
                 "indexed_at": (indexed or {}).get("indexed_at") or "—",
-                "status": _describe_status(bool(indexed), bool(path)),
+                "status": status,
+                "reason": _status_reason(status, path),
                 "size_kb": round(path.stat().st_size / 1024) if path else 0,
             }
         )

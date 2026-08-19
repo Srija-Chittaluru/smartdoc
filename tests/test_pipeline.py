@@ -413,3 +413,54 @@ def test_out_of_scope_question_refuses_without_calling_the_model():
     assert result["status"] == "no_match"
     assert result["answer"] == rag.NO_ANSWER
     assert result["citations"] == []
+
+
+# --- Summarising a whole document --------------------------------------------
+# "Summarise this document" names no subject, so there is nothing to retrieve
+# against; it reads the document instead of searching it.
+
+@pytest.mark.parametrize(
+    "question",
+    ["summarise this document", "Summarize this document", "give me a summary",
+     "what is this document about?", "key points please"],
+)
+def test_recognises_a_summary_request(question):
+    assert rag.is_summary_request(question)
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["How many days of annual leave do I get?",
+     "Summarise the notice period rules, the payroll cut-off dates and who signs them off"],
+)
+def test_a_question_about_a_topic_is_not_a_summary_request(question):
+    assert not rag.is_summary_request(question)
+
+
+def test_a_summary_needs_a_document_to_be_chosen():
+    result = rag.answer_question("summarise this document")
+    assert result["status"] == "pick_document"
+    assert result["citations"] == []
+
+
+def test_an_overview_spans_the_chosen_document():
+    """The excerpts a summary is written from must cover the whole file, and
+    nothing from any other file."""
+    source = any_pdf().name
+    chunks = vector_store.document_overview(source)
+    if not chunks:
+        pytest.skip(f"{source} is not indexed")
+
+    assert {chunk["source"] for chunk in chunks} == {source}
+    pages = [chunk["page"] for chunk in chunks]
+    assert pages == sorted(pages)
+
+
+def test_a_summary_request_retrieves_the_document_not_a_search():
+    source = any_pdf().name
+    if not vector_store.document_overview(source):
+        pytest.skip(f"{source} is not indexed")
+
+    found = rag.retrieve("summarise this document", source=source)
+    assert found["chunks"], "a summary must not come back empty-handed"
+    assert all(chunk["match"] == "overview" for chunk in found["chunks"])

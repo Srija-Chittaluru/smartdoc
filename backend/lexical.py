@@ -91,6 +91,50 @@ def mentions_value(question: str) -> bool:
         return True
     return bool(PROPER_PHRASE.search(question))
 
+MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+WRITTEN_DATE = re.compile(
+    r"\b(?:(\d{1,2})\s+([A-Za-z]{3,9})|([A-Za-z]{3,9})\s+(\d{1,2})),?\s+(\d{4})\b"
+)
+SEPARATED_DATE = re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b")
+
+def date_variants(question: str) -> List[str]:
+    """The dates in a question, rewritten in the two forms the documents use.
+
+    A date is one token only when it is punctuated: "04-02-2026" survives
+    tokenize intact, while "04 Feb 2026" becomes "04", "feb" and "2026" - three
+    pieces the corpus never contains, because it always writes the date glued
+    together. The two spellings mean the same thing and matched nothing in
+    common, so the keyword leg found the first and went silent on the second.
+    """
+    found: List[str] = []
+
+    for match in WRITTEN_DATE.finditer(question):
+        day, year = match.group(1) or match.group(4), match.group(5)
+        name = (match.group(2) or match.group(3))[:3].lower()
+        if name in MONTHS:
+            found.append("%02d-%02d-%s" % (int(day), MONTHS[name], year))
+            found.append("%02d-%s-%s" % (int(day), name, year))
+
+    for day, month, year in SEPARATED_DATE.findall(question):
+        found.append("%02d-%02d-%s" % (int(day), int(month), year))
+
+    return found
+
+def word_pairs(words: Sequence[str]) -> List[str]:
+    """Adjacent word pairs, skipping any pair that leans on a stopword.
+
+    A document writing "The Internal Committee" would otherwise offer the pair
+    "the internal", which is rare only by accident and identifies nothing.
+    """
+    return [
+        f"{first} {second}"
+        for first, second in zip(words, words[1:])
+        if first not in STOPWORDS and second not in STOPWORDS
+    ]
+
 class LexicalIndex:
     """BM25 over a fixed list of chunks, plus the vocabulary statistics the
     relevance gate needs.
@@ -117,6 +161,14 @@ class LexicalIndex:
                 self.document_frequency[token] = self.document_frequency.get(token, 0) + 1
 
         self.rare_ceiling = max(1, int(self.total * RARE_DF_RATIO))
+
+        # Every name the corpus itself writes capitalised, kept as lowercase
+        # adjacent word pairs. This is what lets a question find a name it did
+        # not capitalise; see named_phrases.
+        self.name_pairs: Set[str] = set()
+        for text in self.documents:
+            for phrase in PROPER_PHRASE.findall(text):
+                self.name_pairs.update(word_pairs(phrase.lower().split()))
 
     def is_rare(self, term: str) -> bool:
         """Present in the corpus, and in few enough chunks to pinpoint one."""
@@ -149,6 +201,36 @@ class LexicalIndex:
         needle = phrase.lower()
         return sum(1 for text in self.lowered if needle in text)
 
+    def normalize_dates(self, question: str) -> str:
+        """Add corpus-format spellings of any date the question writes out.
+
+        Only forms that are actually present are added. A date we do not hold
+        contributes nothing, so absent_identifiers still sees an unknown date
+        as unknown rather than being handed a spelling that was invented here.
+        """
+        held = [v for v in date_variants(question) if v in self.document_frequency]
+        return " ".join([question] + held) if held else question
+
+    def named_phrases(self, question: str) -> List[str]:
+        """Names the question mentions, however it happened to capitalise them.
+
+        PROPER_PHRASE can only see "Arshi Dutta", and a question typed into a
+        chat box is usually all lowercase: "who is arshi dutta" named a person
+        the corpus holds, offered the keyword leg no anchor, and left the answer
+        to whatever the embedding thought was nearest - a page of contents.
+
+        A pair of adjacent words qualifies only if the corpus writes that same
+        pair as a proper name, so this cannot let an ordinary phrase in: the
+        evidence comes from the documents, not from how the question was typed.
+        """
+        words = re.findall(r"[a-z][a-z'\-]*", question.lower())
+        return [
+            phrase
+            for phrase in word_pairs(words)
+            if phrase in self.name_pairs
+            and 0 < self.phrase_count(phrase) <= self.rare_ceiling
+        ]
+
     def value_terms(self, question: str) -> List[str]:
         """The parts of a question that name a specific thing we actually hold.
 
@@ -156,8 +238,14 @@ class LexicalIndex:
         and that restriction is what stops the out-of-scope guard from being
         weakened. Two shapes qualify:
 
-          - a token containing a digit  - "04-02-2026", "Calfus-ISMS-PL-15"
+          - an identifier - "04-02-2026", "Calfus-ISMS-PL-15"
           - a capitalised multi-word phrase - "Sherrin Shariff"
+          - the same phrase uncapitalised, when the corpus capitalises it -
+            "arshi dutta", because a document writes "Arshi Dutta"
+
+        An identifier, not any token carrying a digit. A bare "4" is rare enough
+        to pass, and admission below is by substring, so it matched "1.14" and
+        "Purpose 3" and put four unrelated chunks under "4 February 2026".
 
         Each must also be rare. "How do I train a puppy?" offers neither: nothing
         carries a digit, and "train" - which does appear once - is an ordinary
@@ -167,13 +255,15 @@ class LexicalIndex:
         found: List[str] = []
 
         for token in tokenize(question):
-            if looks_like_value(token) and self.is_rare(token):
+            if looks_like_identifier(token) and self.is_rare(token):
                 found.append(token)
 
         for phrase in PROPER_PHRASE.findall(question):
             count = self.phrase_count(phrase)
             if 0 < count <= self.rare_ceiling:
                 found.append(phrase.lower())
+
+        found.extend(self.named_phrases(question))
         return list(dict.fromkeys(found))
 
     def score_all(self, question: str) -> List[Tuple[float, int]]:

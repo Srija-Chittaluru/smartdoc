@@ -4,9 +4,10 @@
 
 Four sets, each answering a different question:
 
-  EXACT     values an embedding cannot represent - dates in both formats, a
-            document code, people's names. Hybrid should find these; semantic
-            alone should not. This is what hybrid was added for.
+  EXACT     values an embedding cannot represent - dates in both formats and
+            written out in words, a document code, people's names. Hybrid should
+            find these; semantic alone should not. This is what hybrid was added
+            for.
 
   NATURAL   ordinary policy questions. The correct chunk must stay at rank 1 and
             the accepted count must not change. This is the no-regression test:
@@ -41,6 +42,13 @@ EXACT = [
     ("What did Sherrin Shariff do?", "Sherrin Shariff"),
     ("Who is Arshi Dutta?", "Arshi Dutta"),
     ("What did Amit Bansal approve?", "Amit Bansal"),
+    # The same dates written out rather than punctuated. These tokenise into
+    # pieces the corpus never contains, so they found nothing until
+    # lexical.date_variants added the corpus's own spelling.
+    ("What is due on 04 Feb 2026?", "04-02-2026"),
+    ("What is due on 4 February 2026?", "04-02-2026"),
+    ("What is due on 04/02/2026?", "04-02-2026"),
+    ("What happened on 11 Jun 2024?", "11-Jun-2024"),
 ]
 
 NATURAL = [
@@ -70,6 +78,9 @@ ABSENT = [
     "Which requests does Sarah Connor own?",
     "Who is Priya Venkatesan?",
     "What does policy Calfus-ISMS-PL-99 say?",
+    # Written out, so the date rewriting is exercised on a date we do not hold.
+    # Only spellings the corpus actually contains are added, so this stays silent.
+    "What is due on 31 Dec 2099?",
 ]
 
 # A known limit, reported rather than asserted. One capitalised word cannot be

@@ -23,6 +23,8 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 150
 
 TOP_K = 4
+# How many excerpts a whole-document summary is written from.
+SUMMARY_K = 14
 CANDIDATE_K = 12
 MAX_DISTANCE = 0.75
 RELATIVE_MARGIN = 0.30

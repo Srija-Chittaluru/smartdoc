@@ -375,6 +375,35 @@ span[class*="material-symbols"],
 .sd-tag--warn { color: #92400e; background: #fffbeb; border: 1px solid #fde68a; }
 .sd-tag--bad  { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; }
 
+/* Hovering a status tag explains it. The bubble is drawn with CSS on the tag
+   itself, so no extra markup or scripting is needed; the status cell has to
+   stop clipping for it to be seen. */
+.sd-td--status { overflow: visible; }
+.sd-tag--tip { position: relative; cursor: help; }
+.sd-tag--tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 16rem;
+  padding: .55rem .7rem;
+  border-radius: 10px;
+  border: 1px solid var(--sd-line);
+  background: #ffffff;
+  color: var(--sd-ink-soft);
+  font-size: .74rem;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 10px 24px -12px rgba(15, 23, 42, .45);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .14s ease;
+}
+.sd-tag--tip:hover::after { opacity: 1; visibility: visible; }
+
 /* Row action icons: quiet until hovered, so a long table stays calm.
    Targeted by widget key (Streamlit adds an st-key-<key> class) rather than by
    "a button inside a column" — the suggestion chips on the Ask page also sit

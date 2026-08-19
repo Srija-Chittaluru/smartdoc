@@ -31,6 +31,7 @@ from backend.config import (
     RELATIVE_MARGIN,
     RRF_K,
     STRONG_MATCH,
+    SUMMARY_K,
     TOP_K,
     W_LEXICAL,
     W_SEMANTIC,
@@ -276,6 +277,42 @@ def semantic_candidates(question: str, total: int, source: str = None) -> List[D
         for distance, text, metadata in kept
     ]
 
+def document_overview(source: str, limit: int = SUMMARY_K) -> List[Dict]:
+    """An even spread of one document's chunks, in reading order.
+
+    "Summarise this document" has nothing to search with: the question names no
+    subject, so the nearest chunks by meaning are arbitrary and the model, handed
+    four of them, correctly says they do not answer the question. A summary needs
+    the document rather than a search of it, so this samples across the whole file
+    - beginning, middle and end - and never looks at the question at all.
+
+    Scores are 1.0 because these excerpts were not retrieved by similarity;
+    they are the chosen document itself, so there is no match to grade.
+    """
+    ids, documents, metadatas = document_scope.restrict(_corpus(), source)
+    if not documents:
+        return []
+
+    # Chunks were stored in reading order, so page number is enough to restore
+    # it - sorted() is stable, which keeps chunks within a page in their order.
+    order = sorted(range(len(documents)), key=lambda position: metadatas[position]["page"])
+    if len(order) > limit:
+        step = len(order) / limit
+        order = [order[int(number * step)] for number in range(limit)]
+
+    return [
+        {
+            "text": documents[position],
+            "source": metadatas[position]["source"],
+            "page": metadatas[position]["page"],
+            "section": metadatas[position].get("section", ""),
+            "score": 1.0,
+            "match": "overview",
+        }
+        for position in order
+    ]
+
+
 def search(
     question: str,
     top_k: int = TOP_K,
@@ -308,11 +345,14 @@ def search(
     if total == 0:
         return []
 
-    asked = lexical_question or question
-    semantic = semantic_candidates(question, total, source)
-    keyword = lexical_candidates(asked, source=source)
     scoped = document_scope.restrict(_corpus(), source)
     index = document_scope.keyword_index(source, scoped[1])
+    # A date written out in words tokenises into pieces the corpus never holds,
+    # so the corpus's own spelling of it is added before either leg reads the
+    # question. See lexical.date_variants.
+    asked = index.normalize_dates(lexical_question or question)
+    semantic = semantic_candidates(question, total, source)
+    keyword = lexical_candidates(asked, source=source)
     if (
         semantic
         and lexical.mentions_value(asked)

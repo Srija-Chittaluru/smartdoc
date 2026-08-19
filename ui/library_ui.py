@@ -4,6 +4,8 @@ Kept out of views/library.py so that the page file reads as a short list of
 what is on the page, and each piece here can be understood on its own.
 """
 
+from html import escape
+
 import streamlit as st
 
 from ui import api
@@ -170,8 +172,12 @@ def table_row(row: dict):
     pages.markdown(f'<div class="sd-td sd-num">{row["pages"]}</div>', unsafe_allow_html=True)
     chunks.markdown(f'<div class="sd-td sd-num">{row["chunks"]}</div>', unsafe_allow_html=True)
     indexed.markdown(f'<div class="sd-td sd-muted">{row["indexed_at"]}</div>', unsafe_allow_html=True)
+    # The tag carries its explanation with it: hovering it pops up why the
+    # document is in that state, which is the only place that is said.
     status.markdown(
-        f'<div class="sd-td"><span class="sd-tag {STATUS_CLASS[row["status"]]}">'
+        f'<div class="sd-td sd-td--status">'
+        f'<span class="sd-tag sd-tag--tip {STATUS_CLASS[row["status"]]}" '
+        f'data-tip="{escape(row.get("reason", ""), quote=True)}">'
         f'{row["status"]}</span></div>',
         unsafe_allow_html=True,
     )
